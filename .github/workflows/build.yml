@@ -6,11 +6,15 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         name: Checkout Repository
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 libsdl2-dev
       - name: Clone QEMU Source
         run: |
           git clone https://gitlab.com/qemu-project/qemu.git
           cd qemu
-          git checkout v8.2.0  # Optional: Use a specific stable version
+          git checkout v8.2.0  # Stable version
       - name: Install Emscripten
         run: |
           git clone https://github.com/emscripten-core/emsdk.git
@@ -18,15 +22,15 @@ jobs:
           ./emsdk install latest
           ./emsdk activate latest
           source ./emsdk_env.sh
-        working-directory: .  # Run this in the root directory
+        working-directory: .
       - name: Configure and Build QEMU
         run: |
-          cd qemu  # Move into the QEMU directory
+          cd qemu
           ./configure --target-list=i386-softmmu --cc=emcc --cxx=em++ --extra-cflags="-s USE_SDL=2" --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
           emmake make -j$(nproc)
-        working-directory: .  # Start from root, but cd into qemu
+        working-directory: .
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: qemu-wasm
-          path: qemu/i386-softmmu/qemu-system-i386.*  # Adjusted path to match QEMU dir
+          path: qemu/i386-softmmu/qemu-system-i386.*
