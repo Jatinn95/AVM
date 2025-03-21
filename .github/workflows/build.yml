@@ -6,11 +6,11 @@ jobs:
     timeout-minutes: 45
     strategy:
       matrix:
-        target: ["i386-softmmu", "x86_64-softmmu"]  # Add more targets as needed
+        target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      QEMU_VERSION: "8.2.0"  # Define QEMU version as an environment variable
-      EMSDK_VERSION: "latest"  # Define Emscripten version
-      ARTIFACT_RETENTION_DAYS: 7  # Retain artifacts for 7 days
+      QEMU_VERSION: "8.2.0"
+      EMSDK_VERSION: "latest"
+      ARTIFACT_RETENTION_DAYS: 7
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -69,7 +69,7 @@ jobs:
       - name: Build QEMU
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          emmake make -j$(($(nproc) > 4 ? 4 : $(nproc)))  # Use up to 4 jobs for stability
+          emmake make -j2  # Conservative job limit
           echo "QEMU build completed for target: ${{ matrix.target }}"
         working-directory: .
 
@@ -101,21 +101,5 @@ jobs:
 
       - name: Notify Build Status
         if: always()
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { data: commit } = await github.rest.repos.getCommit({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: context.sha
-            });
-            const status = job.status === 'success' ? '✅ Success' : '❌ Failed';
-            const message = `Build ${status} for target **${{ matrix.target }}** (${context.sha})\n` +
-                           `Commit: ${commit.commit.message}\n` +
-                           `Details: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: message
-            });
+        run: |
+          echo "Build completed for ${{ matrix.target }} with status: ${{ job.status }}"
