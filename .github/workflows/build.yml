@@ -3,7 +3,7 @@ on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # Fail if it takes over 1 hour
+    timeout-minutes: 45  # Fail after 45 minutes
     steps:
       - uses: actions/checkout@v3
         name: Checkout Repository
@@ -28,10 +28,11 @@ jobs:
         run: |
           cd qemu
           ./configure --target-list=i386-softmmu --cc=emcc --cxx=em++ --extra-cflags="-s USE_SDL=2" --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
-          emmake make -j2  # Limit to 2 jobs to avoid overloading
+          emmake make -j2  # Limit to 2 jobs
         working-directory: .
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # Upgrade to v4
         with:
           name: qemu-wasm
           path: qemu/i386-softmmu/qemu-system-i386.*
+          if-no-files-found: error  # Fail if no files match
