@@ -4,34 +4,60 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45  # Fail after 45 minutes
+    env:
+      QEMU_VERSION: "10.0.0"  # Define QEMU version as an environment variable
     steps:
-      - uses: actions/checkout@v3
-        name: Checkout Repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libsdl2-dev
-      - name: Download QEMU Source
-        run: |
-          wget https://download.qemu.org/qemu-8.2.0.tar.xz
-          tar -xf qemu-8.2.0.tar.xz
-          mv qemu-8.2.0 qemu
+          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev
+
+      - name: Cache Emscripten SDK
+        id: cache-emsdk
+        uses: actions/cache@v3
+        with:
+          path: emsdk
+          key: emsdk-${{ runner.os }}-${{ hashFiles('**/emsdk-version.txt') }}
+          restore-keys: |
+            emsdk-${{ runner.os }}-
+
       - name: Install Emscripten
         run: |
-          git clone https://github.com/emscripten-core/emsdk.git
+          if [ ! -d "emsdk" ]; then
+            git clone https://github.com/emscripten-core/emsdk.git
+          fi
           cd emsdk
           ./emsdk install latest
           ./emsdk activate latest
+          echo "latest" > emsdk-version.txt
           source ./emsdk_env.sh
         working-directory: .
-      - name: Configure and Build QEMU
+
+      - name: Download QEMU Source
+        run: |
+          wget https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
+          tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
+          mv qemu-${{ env.QEMU_VERSION }} qemu
+
+      - name: Configure QEMU
         run: |
           cd qemu
-          ./configure --target-list=i386-softmmu --cc=emcc --cxx=em++ --extra-cflags="-s USE_SDL=2" --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
-          emmake make -j2  # Limit to 2 jobs
+          ./configure --target-list=i386-softmmu --cc=emcc --cxx=em++ \
+            --extra-cflags="-s USE_SDL=2" \
+            --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
         working-directory: .
+
+      - name: Build QEMU
+        run: |
+          cd qemu
+          emmake make -j$(nproc)  # Use all available cores for faster builds
+        working-directory: .
+
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4  # Upgrade to v4
+        uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm
           path: qemu/i386-softmmu/qemu-system-i386.*
