@@ -1,0 +1,32 @@
+name: Build QEMU WebAssembly
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout Repository
+      - name: Clone QEMU Source
+        run: |
+          git clone https://gitlab.com/qemu-project/qemu.git
+          cd qemu
+          git checkout v8.2.0  # Optional: Use a specific stable version
+      - name: Install Emscripten
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
+          source ./emsdk_env.sh
+        working-directory: .  # Run this in the root directory
+      - name: Configure and Build QEMU
+        run: |
+          cd qemu  # Move into the QEMU directory
+          ./configure --target-list=i386-softmmu --cc=emcc --cxx=em++ --extra-cflags="-s USE_SDL=2" --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
+          emmake make -j$(nproc)
+        working-directory: .  # Start from root, but cd into qemu
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: qemu-wasm
+          path: qemu/i386-softmmu/qemu-system-i386.*  # Adjusted path to match QEMU dir
