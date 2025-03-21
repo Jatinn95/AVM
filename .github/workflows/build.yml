@@ -3,6 +3,7 @@ on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60  # Fail if it takes over 1 hour
     steps:
       - uses: actions/checkout@v3
         name: Checkout Repository
@@ -10,11 +11,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential python3 libsdl2-dev
-      - name: Clone QEMU Source
+      - name: Download QEMU Source
         run: |
-          git clone https://gitlab.com/qemu-project/qemu.git
-          cd qemu
-          git checkout v8.2.0  # Stable version
+          wget https://download.qemu.org/qemu-8.2.0.tar.xz
+          tar -xf qemu-8.2.0.tar.xz
+          mv qemu-8.2.0 qemu
       - name: Install Emscripten
         run: |
           git clone https://github.com/emscripten-core/emsdk.git
@@ -27,7 +28,7 @@ jobs:
         run: |
           cd qemu
           ./configure --target-list=i386-softmmu --cc=emcc --cxx=em++ --extra-cflags="-s USE_SDL=2" --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
-          emmake make -j$(nproc)
+          emmake make -j2  # Limit to 2 jobs to avoid overloading
         working-directory: .
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3
