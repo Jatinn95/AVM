@@ -107,9 +107,10 @@ jobs:
           endif
           EOF
           # Find the start and end lines of the block to replace
-          START_LINE=$(grep -n "if not cc.compiles.*#include <glib.h>" meson.build | grep -A 10 "QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)" | head -n 1 | cut -d: -f1)
+          START_LINE=$(grep -n "if not cc.compiles('''" meson.build | grep -A 10 "QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)" | head -n 1 | cut -d: -f1)
           if [ -z "$START_LINE" ]; then
             echo "Error: Could not find GLIB_SIZEOF_SIZE_T check block!"
+            grep -n "if not cc.compiles" meson.build  # Debug: Show all similar lines
             exit 1
           fi
           END_LINE=$(awk "NR>$START_LINE && /endif/ {print NR; exit}" meson.build)
