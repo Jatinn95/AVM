@@ -5,7 +5,7 @@ jobs:
   build-from-source:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    continue-on-error: true  # Allow this job to fail without failing the workflow
+    continue-on-error: true
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
@@ -83,7 +83,7 @@ jobs:
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Patching configure script to bypass host OS check..."
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          grep -A 5 "Unrecognized host OS" configure  # Verify patch
+          grep -A 5 "Unrecognized host OS" configure
         working-directory: .
 
       - name: Patch QEMU Meson Build File
@@ -194,7 +194,7 @@ jobs:
         run: |
           echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
 
-  # Fetch and use pre-built Qemu.js (confirmed working)
+  # Fetch and build Qemu.js to ensure artifacts (updated to generate binaries)
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -207,26 +207,64 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Fetch Qemu.js Pre-built Binaries
+      - name: Install Emscripten
         run: |
-          echo "Fetching pre-built Qemu.js binaries..."
+          echo "Cloning Emscripten SDK..."
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          echo "Installing Emscripten latest..."
+          ./emsdk install latest
+          echo "Activating Emscripten latest..."
+          ./emsdk activate latest
+          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
+          source ./emsdk_env.sh
+          echo "Emscripten version: $(emcc --version)"
+        working-directory: .
+        timeout-minutes: 10
+
+      - name: Fetch and Build Qemu.js
+        run: |
+          echo "Fetching Qemu.js source..."
           git clone https://github.com/atrosinenko/qemujs.git
           cd qemujs
-          echo "Listing available binaries..."
+          echo "Listing directory contents..."
           ls -la
+          # Check for build script and run it
+          if [ -f "build.sh" ]; then
+            echo "Found build.sh, attempting to build Qemu.js..."
+            source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+            chmod +x build.sh
+            ./build.sh || {
+              echo "Build failed, checking for pre-built binaries instead..."
+              ls -la qemu-system-*.js || echo "No pre-built binaries found either."
+            }
+          else
+            echo "No build.sh found, checking for pre-built binaries..."
+            ls -la qemu-system-*.js || {
+              echo "No pre-built qemu-system-*.js files found in repo."
+              echo "Attempting to fetch from latest release..."
+              curl -s https://api.github.com/repos/atrosinenko/qemujs/releases/latest > release.json
+              ASSET_URL=$(jq -r '.assets[] | select(.name | endswith(".js")) | .browser_download_url' release.json | head -n 1)
+              if [ -n "$ASSET_URL" ]; then
+                echo "Downloading $ASSET_URL..."
+                wget "$ASSET_URL" -O qemu-system-i386.js
+                ls -la qemu-system-*.js
+              else
+                echo "No .js artifacts found in latest release."
+                exit 1
+              fi
+            }
+          fi
           echo "Qemu.js version information (if available):"
           if [ -f "qemu-system-i386.js" ]; then
             node qemu-system-i386.js --version || echo "Version check not supported directly."
-          else
-            echo "Expected binary qemu-system-i386.js not found, listing directory contents:"
-            ls -la
           fi
         working-directory: .
 
       - name: Test Qemu.js Binary
         run: |
           cd qemujs
-          echo "Testing Qemu.js pre-built binary..."
+          echo "Testing Qemu.js binary..."
           if [ -f "qemu-system-i386.js" ]; then
             node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
           else
@@ -239,13 +277,13 @@ jobs:
         with:
           name: qemu-js-prebuilt
           path: qemujs/qemu-system-*.js
-          if-no-files-found: warn
+          if-no-files-found: error  # Fail if no files are found to catch issues early
           retention-days: 7
 
       - name: Cleanup
         run: |
           echo "Cleaning up Qemu.js files..."
-          rm -rf qemujs
+          rm -rf qemujs emsdk
           echo "Cleanup completed."
 
       - name: Notify Build Status
