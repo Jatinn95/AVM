@@ -129,7 +129,7 @@ jobs:
           echo "Debug: Emscripten version $(emcc --version)"
           echo "Debug: Verifying cross-file exists..."
           ls -l emscripten-cross.txt || { echo "Cross-file not found!"; exit 1; }
-          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++"
+          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ --enable-tcg-interpreter"
           echo "Running configure: $CONFIGURE_CMD"
           eval "$CONFIGURE_CMD" || {
             echo "Configure failed, dumping Meson log..."
