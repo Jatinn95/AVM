@@ -32,19 +32,21 @@ jobs:
       - name: Install Emscripten
         run: |
           if [ ! -d "emsdk" ]; then
+            echo "Cloning Emscripten SDK..."
             git clone https://github.com/emscripten-core/emsdk.git
-            cd emsdk
+          fi
+          cd emsdk
+          if [ ! -d "upstream/emscripten" ]; then
             echo "Installing Emscripten ${{ env.EMSDK_VERSION }}..."
             ./emsdk install ${{ env.EMSDK_VERSION }} || {
               echo "Failed to install Emscripten, retrying once..."
               ./emsdk install ${{ env.EMSDK_VERSION }}
             }
           else
-            cd emsdk
             echo "Emscripten directory exists, updating via git..."
             git pull || echo "Git pull failed, proceeding with existing version..."
           fi
-          cd emsdk
+          echo "Activating Emscripten ${{ env.EMSDK_VERSION }}..."
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
