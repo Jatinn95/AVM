@@ -8,7 +8,7 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      QEMU_VERSION: "10.0.0"  # Updated from 8.2.0 to 10.0.0
+      QEMU_VERSION: "10.0.0"  # Your requested version
       EMSDK_VERSION: "latest"
       ARTIFACT_RETENTION_DAYS: 7
     steps:
@@ -53,9 +53,14 @@ jobs:
       - name: Download QEMU Source
         if: steps.cache-qemu.outputs.cache-hit != 'true'
         run: |
-          wget https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
+          echo "Attempting to download QEMU ${{ env.QEMU_VERSION }}..."
+          wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz || {
+            echo "Error: Failed to download qemu-${{ env.QEMU_VERSION }}.tar.xz. Check version availability at https://download.qemu.org/";
+            exit 1;
+          }
           tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
-          echo "QEMU source downloaded and extracted."
+          echo "QEMU source downloaded and extracted successfully."
+        timeout-minutes: 10
 
       - name: Configure QEMU
         run: |
@@ -69,18 +74,21 @@ jobs:
       - name: Build QEMU
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          emmake make -j2  # Conservative job limit
+          emmake make -j2 V=1  # Added verbosity
           echo "QEMU build completed for target: ${{ matrix.target }}"
         working-directory: .
+        timeout-minutes: 15  # Added timeout for build step
 
       - name: Test QEMU Binary
         run: |
           cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
+          ls -la  # Debug: list files
           if [ ! -f "qemu-system-${{ matrix.target }}" ]; then
             echo "Error: QEMU binary not found!"
             exit 1
           fi
           echo "Testing QEMU binary for target: ${{ matrix.target }}"
+          node --version  # Debug: verify node
           node qemu-system-${{ matrix.target }} --version || echo "Test failed, but continuing..."
         working-directory: .
 
