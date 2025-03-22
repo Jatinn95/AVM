@@ -94,8 +94,10 @@ jobs:
           echo "Patching meson.build to bypass compiler version check for Emscripten..."
           sed -i "s|error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|message('Allowing Emscripten: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|" meson.build
           echo "Patching meson.build to bypass GLIB_SIZEOF_SIZE_T check for Emscripten..."
-          # Replace lines 1028-1038 with conditional for Emscripten using heredoc
-          sed -i '1028,1038c\' meson.build << 'EOF'
+          echo "Pre-patch context (searching for GLIB_SIZEOF_SIZE_T check):"
+          grep -A 10 -B 10 "QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)" meson.build || echo "Pattern not found!"
+          # Use a temporary file to apply the patch
+          cat > temp.patch << 'EOF'
           if not meson.is_cross_build() or meson.get_cross_property('system') != 'emscripten'
             if cc.compiles('#include <glib.h>\n#include <unistd.h>\n#define QEMU_BUILD_BUG_ON(x) \\\n typedef char qemu_build_bug_on[(x)?-1:1] __attribute__((unused));\nint main(void) {\n QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T);\n return 0;\n}', dependencies: glib_dep)
               cdata.set('HAVE_GLIB_SIZEOF_SIZE_T_MATCH', 1)
@@ -108,9 +110,23 @@ jobs:
             cdata.set('HAVE_GLIB_SIZEOF_SIZE_T_MATCH', 1)
           endif
           EOF
+          # Find the start and end lines of the block to replace
+          START_LINE=$(grep -n "if cc.compiles.*QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)" meson.build | cut -d: -f1)
+          if [ -z "$START_LINE" ]; then
+            echo "Error: Could not find GLIB_SIZEOF_SIZE_T check block!"
+            exit 1
+          fi
+          END_LINE=$(awk "NR>$START_LINE && /endif/ {print NR; exit}" meson.build)
+          if [ -z "$END_LINE" ]; then
+            echo "Error: Could not find end of GLIB_SIZEOF_SIZE_T check block!"
+            exit 1
+          fi
+          echo "Replacing lines $START_LINE to $END_LINE..."
+          sed -i "${START_LINE},${END_LINE}c\\$(cat temp.patch)" meson.build
+          rm temp.patch
           echo "Verifying patches:"
           sed -n '320,340p' meson.build  # Compiler version patch context
-          sed -n '1020,1040p' meson.build  # GLIB_SIZEOF_SIZE_T patch context
+          sed -n "$((START_LINE-10)),$((END_LINE+10))p" meson.build  # GLIB_SIZEOF_SIZE_T patch context
           if ! grep -q "meson.is_cross_build" meson.build; then
             echo "Error: Patch failed to apply, meson.is_cross_build not found!"
             exit 1
