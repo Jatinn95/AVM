@@ -81,8 +81,11 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
+          echo "Checking configure options..."
+          ./configure --help | grep -E "host|target|cc"
+          echo "Configuring QEMU..."
           ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
-            --host=wasm32-unknown-emscripten --disable-system \
+            --disable-system --disable-linux-user \
             --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
             --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1"
           echo "QEMU configured for target: ${{ matrix.target }}"
