@@ -51,12 +51,12 @@ jobs:
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           echo "Building glib port for Emscripten..."
-          python3 "${{ env.EMSDK_PATH }}/upstream/emscripten/embuilder.py" build zlib
-          python3 "${{ env.EMSDK_PATH }}/upstream/emscripten/embuilder.py" build glib || {
+          python3 "$EMSDK_PATH/upstream/emscripten/embuilder.py" build zlib
+          python3 "$EMSDK_PATH/upstream/emscripten/embuilder.py" build glib || {
             echo "Failed to build glib, retrying once..."
-            python3 "${{ env.EMSDK_PATH }}/upstream/emscripten/embuilder.py" build glib
+            python3 "$EMSDK_PATH/upstream/emscripten/embuilder.py" build glib
           }
-          ls -l "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" || {
+          ls -l "$EMSDK_PATH/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" || {
             echo "Error: glib-2.0.pc not found after building glib port!"
             exit 1
           }
@@ -140,15 +140,13 @@ jobs:
           echo "Debug: Emscripten version $(emcc --version)"
           echo "Debug: Verifying cross-file exists..."
           ls -l emscripten-cross.txt || { echo "Cross-file not found!"; exit 1; }
-          # Use Emscripten's pkg-config exclusively
           export PKG_CONFIG="${{ env.EMSDK_PATH }}/upstream/emscripten/em-pkg-config"
           export PKG_CONFIG_PATH="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig"
-          unset PKG_CONFIG_PATH_DEFAULT  # Clear any system defaults if set
+          unset PKG_CONFIG_PATH_DEFAULT
           echo "Debug: PKG_CONFIG set to $PKG_CONFIG"
           echo "Debug: PKG_CONFIG_PATH set to $PKG_CONFIG_PATH"
           echo "Debug: PKG_CONFIG_LIBDIR set to $PKG_CONFIG_LIBDIR"
-          # Verify glib version and paths
           echo "Debug: Checking glib version..."
           $PKG_CONFIG --modversion glib-2.0 || { echo "Error: glib-2.0 not found in Emscripten pkg-config path"; exit 1; }
           echo "Debug: glib cflags: $($PKG_CONFIG --cflags glib-2.0)"
