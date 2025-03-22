@@ -85,6 +85,30 @@ jobs:
           grep -A 5 "Unrecognized host OS" configure  # Verify patch
         working-directory: .
 
+      - name: Create Meson Cross-File
+        run: |
+          cd qemu-${{ env.QEMU_VERSION }}
+          cat > emscripten-cross.txt << 'EOF'
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          strip = 'emstrip'
+          pkgconfig = 'pkg-config'
+
+          [properties]
+          needs_exe_wrapper = true
+
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+          EOF
+          echo "Created Meson cross-file:"
+          cat emscripten-cross.txt
+        working-directory: .
+
       - name: Configure QEMU
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
@@ -94,15 +118,19 @@ jobs:
           CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
             --cross-prefix=em- \
             --extra-cflags='-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1' \
-            --extra-ldflags='-s USE_SDL=2 -s EXPORTED_FUNCTIONS=[_main] -s EXPORTED_RUNTIME_METHODS=[ccall,cwrap] -s ALLOW_MEMORY_GROWTH=1'"
-          echo "Running: $CONFIGURE_CMD"
+            --extra-ldflags='-s USE_SDL=2 -s EXPORTED_FUNCTIONS=\"[_main]\" -s EXPORTED_RUNTIME_METHODS=\"[ccall,cwrap]\" -s ALLOW_MEMORY_GROWTH=1'"
+          echo "Running initial configure: $CONFIGURE_CMD"
           eval "$CONFIGURE_CMD" || {
-            echo "Configure failed, checking for Meson log..."
+            echo "Initial configure failed, checking for Meson log..."
             if [ -f build/meson-logs/meson-log.txt ]; then
               cat build/meson-logs/meson-log.txt
-            else
-              echo "No Meson log available."
             fi
+            exit 1
+          }
+          echo "Reconfiguring Meson with cross-file..."
+          meson setup --reconfigure --cross-file emscripten-cross.txt build || {
+            echo "Meson reconfigure failed, dumping log..."
+            cat build/meson-logs/meson-log.txt
             exit 1
           }
           echo "QEMU configured for target: ${{ matrix.target }}"
