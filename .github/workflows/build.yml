@@ -25,7 +25,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: emsdk
-          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v2  # Updated key for consistency
           restore-keys: |
             emsdk-${{ runner.os }}-
 
@@ -33,14 +33,23 @@ jobs:
         run: |
           if [ ! -d "emsdk" ]; then
             git clone https://github.com/emscripten-core/emsdk.git
+            cd emsdk
+            ./emsdk install ${{ env.EMSDK_VERSION }} || {
+              echo "Failed to install Emscripten, retrying once..."
+              ./emsdk install ${{ env.EMSDK_VERSION }}
+            }
+          else
+            echo "Emscripten directory already exists, updating..."
+            cd emsdk
+            ./emsdk update
           fi
           cd emsdk
-          ./emsdk install ${{ env.EMSDK_VERSION }}
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           echo "Emscripten version: $(emcc --version)"
         working-directory: .
+        timeout-minutes: 15  # Added timeout to allow large download
 
       - name: Cache QEMU Source
         id: cache-qemu
