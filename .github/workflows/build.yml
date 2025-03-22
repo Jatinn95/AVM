@@ -50,17 +50,6 @@ jobs:
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
-          echo "Building glib port for Emscripten..."
-          python3 "$EMSDK_PATH/upstream/emscripten/embuilder.py" build zlib
-          python3 "$EMSDK_PATH/upstream/emscripten/embuilder.py" build glib || {
-            echo "Failed to build glib, retrying once..."
-            python3 "$EMSDK_PATH/upstream/emscripten/embuilder.py" build glib
-          }
-          ls -l "$EMSDK_PATH/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" || {
-            echo "Error: glib-2.0.pc not found after building glib port!"
-            exit 1
-          }
-          echo "glib port installed successfully."
           echo "Emscripten version: $(emcc --version)"
         working-directory: .
         timeout-minutes: 15
@@ -140,18 +129,11 @@ jobs:
           echo "Debug: Emscripten version $(emcc --version)"
           echo "Debug: Verifying cross-file exists..."
           ls -l emscripten-cross.txt || { echo "Cross-file not found!"; exit 1; }
-          export PKG_CONFIG="${{ env.EMSDK_PATH }}/upstream/emscripten/em-pkg-config"
-          export PKG_CONFIG_PATH="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig"
-          export PKG_CONFIG_LIBDIR="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig"
-          unset PKG_CONFIG_PATH_DEFAULT
-          echo "Debug: PKG_CONFIG set to $PKG_CONFIG"
+          # Use host's glib-2.0.pc but ensure cross-compilation
+          export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig"
           echo "Debug: PKG_CONFIG_PATH set to $PKG_CONFIG_PATH"
-          echo "Debug: PKG_CONFIG_LIBDIR set to $PKG_CONFIG_LIBDIR"
-          echo "Debug: Checking glib version..."
-          $PKG_CONFIG --modversion glib-2.0 || { echo "Error: glib-2.0 not found in Emscripten pkg-config path"; exit 1; }
-          echo "Debug: glib cflags: $($PKG_CONFIG --cflags glib-2.0)"
-          echo "Debug: glib libs: $($PKG_CONFIG --libs glib-2.0)"
-          CONFIGURE_CMD="emconfigure ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ --enable-tcg-interpreter --disable-xen"
+          pkg-config --modversion glib-2.0 || { echo "Error: glib-2.0 not found in host pkg-config path"; exit 1; }
+          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ --enable-tcg-interpreter --disable-xen"
           echo "Running configure: $CONFIGURE_CMD"
           eval "$CONFIGURE_CMD" || {
             echo "Configure failed, dumping Meson log..."
