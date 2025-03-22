@@ -137,7 +137,7 @@ jobs:
           node qemu-system-${{ matrix.target }} --version || echo "Test failed, but continuing..."
         working-directory: .
 
-      - name: Upload Artifacts
+      - name: Update Artifacts
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -156,7 +156,7 @@ jobs:
         run: |
           echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
 
-  # Build Qemu.js using qemujs-builder
+  # Build Qemu.js using qemujs-builder with configure-cmd.sh and make
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -184,38 +184,45 @@ jobs:
       - name: Install Build Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential wget jq
+          sudo apt-get install -y build-essential git python3 ninja-build
 
       - name: Fetch and Build Qemu.js with qemujs-builder
         run: |
           echo "Fetching qemujs-builder..."
-          git clone https://github.com/atrosinenko/qemujs-builder.git
+          git clone --recurse-submodules https://github.com/atrosinenko/qemujs-builder.git
           cd qemujs-builder
           echo "Listing directory contents..."
           ls -la
-          # Run build script
-          if [ -f "build.sh" ]; then
-            echo "Running build.sh to generate Qemu.js binaries..."
+          # Configure using configure-cmd.sh
+          if [ -f "configure-cmd.sh" ]; then
+            echo "Running configure-cmd.sh to set up Qemu.js..."
             source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-            chmod +x build.sh
-            ./build.sh || {
-              echo "Build failed, checking build directory..."
-              ls -la build
+            chmod +x configure-cmd.sh
+            ./configure-cmd.sh || {
+              echo "Configuration failed!"
+              exit 1
+            }
+            echo "Configuration completed, building with make..."
+            # Build in qemu/build directory (created by configure-cmd.sh)
+            cd qemu/build
+            emmake make -j2 || {
+              echo "Make failed, checking build directory..."
+              ls -la
               exit 1
             }
             echo "Build completed, checking for binaries..."
-            ls -la build/qemu-system-*.js || {
-              echo "No qemu-system-*.js files found in build directory."
+            ls -la ../qemu-system-*.js || {
+              echo "No qemu-system-*.js files found in qemu directory, checking build dir..."
+              ls -la qemu-system-*.js || echo "No binaries found in build dir either."
               exit 1
             }
             # Copy binaries to a predictable location
-            mkdir -p ../qemujs-binaries
-            cp build/qemu-system-*.js ../qemujs-binaries/
-            cp build/*.html.mem ../qemujs-binaries/ 2>/dev/null || echo "No .html.mem files found."
-            cp build/*.data ../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
-            cp shell.html ../qemujs-binaries/ 2>/dev/null || echo "No shell.html found."
+            mkdir -p ../../qemujs-binaries
+            cp ../qemu-system-*.js ../../qemujs-binaries/
+            cp ../*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
+            cp ../shell.html ../../qemujs-binaries/ 2>/dev/null || echo "No shell.html found."
           else
-            echo "No build.sh found in qemujs-builder!"
+            echo "No configure-cmd.sh found in qemujs-builder!"
             exit 1
           fi
         working-directory: .
