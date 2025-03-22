@@ -92,9 +92,9 @@ jobs:
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Patching meson.build to bypass compiler version check for Emscripten..."
-          sed -i "/You either need GCC/ { s/error(/message(/; s|$| (allowing Emscripten)|; }" meson.build
+          sed -i "/You either need GCC/ s/error(/message('Allowing Emscripten: /" meson.build
           echo "Verifying patch around line 328:"
-          sed -n '325,335p' meson.build  # Show context around the patched line
+          sed -n '320,340p' meson.build  # Show broader context around the patched line
         working-directory: .
 
       - name: Create Meson Cross-File
