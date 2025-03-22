@@ -70,7 +70,7 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
           ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
-            --host-cc=gcc --cross-prefix="" --disable-system --enable-softmmu \
+            --host-cc=gcc --cross-prefix="" --disable-system \
             --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
             --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1"
           echo "QEMU configured for target: ${{ matrix.target }}"
