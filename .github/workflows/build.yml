@@ -99,19 +99,15 @@ jobs:
           # Use a temporary file to apply the patch
           cat > temp.patch << 'EOF'
           if not meson.is_cross_build() or meson.get_cross_property('system') != 'emscripten'
-            if cc.compiles('#include <glib.h>\n#include <unistd.h>\n#define QEMU_BUILD_BUG_ON(x) \\\n typedef char qemu_build_bug_on[(x)?-1:1] __attribute__((unused));\nint main(void) {\n QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T);\n return 0;\n}', dependencies: glib_dep)
-              cdata.set('HAVE_GLIB_SIZEOF_SIZE_T_MATCH', 1)
-            else
+            if not cc.compiles('#include <glib.h>\n#include <unistd.h>\n#define QEMU_BUILD_BUG_ON(x) \\\n typedef char qemu_build_bug_on[(x)?-1:1] __attribute__((unused));\nint main(void) {\n QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T);\n return 0;\n}', dependencies: glib_pc, args: glib_cflags)
               error('sizeof(size_t) doesn\'t match GLIB_SIZEOF_SIZE_T.\n' +
                     'You probably need to set PKG_CONFIG_LIBDIR to point\n' +
                     'to the right pkg-config files for your build target.')
             endif
-          else
-            cdata.set('HAVE_GLIB_SIZEOF_SIZE_T_MATCH', 1)
           endif
           EOF
           # Find the start and end lines of the block to replace
-          START_LINE=$(grep -n "if cc.compiles.*QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)" meson.build | cut -d: -f1)
+          START_LINE=$(grep -n "if not cc.compiles.*#include <glib.h>" meson.build | grep -A 10 "QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)" | head -n 1 | cut -d: -f1)
           if [ -z "$START_LINE" ]; then
             echo "Error: Could not find GLIB_SIZEOF_SIZE_T check block!"
             exit 1
