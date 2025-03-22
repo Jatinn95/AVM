@@ -20,10 +20,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build
 
-      - name: Install Sphinx (for documentation)
-        run: |
-          pip install sphinx sphinx_rtd_theme
-
       - name: Cache Emscripten SDK
         id: cache-emsdk
         uses: actions/cache@v3
@@ -40,15 +36,20 @@ jobs:
             git clone https://github.com/emscripten-core/emsdk.git
           fi
           cd emsdk
-          echo "Installing Emscripten ${{ env.EMSDK_VERSION }}..."
-          ./emsdk install ${{ env.EMSDK_VERSION }} || {
-            echo "Failed to install Emscripten, retrying once..."
-            ./emsdk install ${{ env.EMSDK_VERSION }}
-          }
+          if [ ! -d "upstream/emscripten" ]; then
+            echo "Installing Emscripten ${{ env.EMSDK_VERSION }}..."
+            ./emsdk install ${{ env.EMSDK_VERSION }} || {
+              echo "Failed to install Emscripten, retrying once..."
+              ./emsdk install ${{ env.EMSDK_VERSION }}
+            }
+          else
+            echo "Emscripten directory exists, updating via git..."
+            git pull || echo "Git pull failed, proceeding with existing version..."
+          fi
           echo "Activating Emscripten ${{ env.EMSDK_VERSION }}..."
           ./emsdk activate ${{ env.EMSDK_VERSION }}
-          source ./emsdk_env.sh
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
+          source ./emsdk_env.sh
           echo "Emscripten version: $(emcc --version)"
         working-directory: .
         timeout-minutes: 15
@@ -76,17 +77,26 @@ jobs:
           echo "QEMU source downloaded and extracted successfully."
         timeout-minutes: 10
 
+      - name: Patch QEMU Configure Script
+        run: |
+          cd qemu-${{ env.QEMU_VERSION }}
+          echo "Patching configure script to bypass host OS check for emcc..."
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          grep -A 5 "Unrecognized host OS" configure  # Verify patch
+        working-directory: .
+
       - name: Configure QEMU
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Debug: Host OS reported as $(uname -s)"
           echo "Debug: Emscripten version $(emcc --version)"
-          echo "Configuring QEMU..."
-          ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
-            --host=emscripten --disable-system --disable-linux-user \
-            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
-            --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1"
+          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
+            --disable-system --disable-linux-user \
+            --extra-cflags='-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1' \
+            --extra-ldflags='-s USE_SDL=2 -s EXPORTED_FUNCTIONS=[_main] -s EXPORTED_RUNTIME_METHODS=[ccall,cwrap] -s ALLOW_MEMORY_GROWTH=1'"
+          echo "Running: $CONFIGURE_CMD"
+          eval "$CONFIGURE_CMD"
           echo "QEMU configured for target: ${{ matrix.target }}"
         working-directory: .
 
