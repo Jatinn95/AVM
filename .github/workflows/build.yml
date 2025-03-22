@@ -88,6 +88,15 @@ jobs:
           grep "meson setup" configure  # Verify cross-file injection
         working-directory: .
 
+      - name: Patch QEMU Meson Build File
+        run: |
+          cd qemu-${{ env.QEMU_VERSION }}
+          echo "Patching meson.build to bypass compiler version check for Emscripten..."
+          sed -i "/You either need GCC/ { s/error(/message(/; s|$| (allowing Emscripten)|; }" meson.build
+          echo "Verifying patch around line 328:"
+          sed -n '325,335p' meson.build  # Show context around the patched line
+        working-directory: .
+
       - name: Create Meson Cross-File
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
