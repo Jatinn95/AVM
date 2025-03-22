@@ -34,21 +34,10 @@ jobs:
       - name: Install Emscripten
         run: |
           if [ ! -d "emsdk" ]; then
-            echo "Cloning Emscripten SDK..."
             git clone https://github.com/emscripten-core/emsdk.git
           fi
           cd emsdk
-          if [ ! -d "upstream/emscripten" ]; then
-            echo "Installing Emscripten ${{ env.EMSDK_VERSION }}..."
-            ./emsdk install ${{ env.EMSDK_VERSION }} || {
-              echo "Failed to install Emscripten, retrying once..."
-              ./emsdk install ${{ env.EMSDK_VERSION }}
-            }
-          else
-            echo "Emscripten directory exists, updating via git..."
-            git pull || echo "Git pull failed, proceeding with existing version..."
-          fi
-          echo "Activating Emscripten ${{ env.EMSDK_VERSION }}..."
+          ./emsdk install ${{ env.EMSDK_VERSION }}
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
@@ -68,31 +57,23 @@ jobs:
       - name: Download QEMU Source
         if: steps.cache-qemu.outputs.cache-hit != 'true'
         run: |
-          echo "Attempting to download QEMU ${{ env.QEMU_VERSION }}..."
           wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz || {
             echo "Error: Failed to download qemu-${{ env.QEMU_VERSION }}.tar.xz."
-            echo "Check version availability at https://download.qemu.org/."
             exit 1
           }
           tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
-          echo "QEMU source downloaded and extracted successfully."
         timeout-minutes: 10
 
       - name: Patch QEMU Configure Script
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "Patching configure script to bypass host OS check..."
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          grep -A 5 "Unrecognized host OS" configure
         working-directory: .
 
       - name: Patch QEMU Meson Build File
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "Patching meson.build to bypass compiler version check..."
           sed -i "s|error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|message('Allowing Emscripten: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|" meson.build
-          echo "Verifying patch around line 328:"
-          sed -n '320,340p' meson.build
         working-directory: .
 
       - name: Create Meson Cross-File
@@ -115,8 +96,6 @@ jobs:
           cpu = 'wasm32'
           endian = 'little'
           EOF
-          echo "Created Meson cross-file at $(pwd)/emscripten-cross.txt:"
-          cat emscripten-cross.txt
         working-directory: .
 
       - name: Configure QEMU
@@ -124,26 +103,15 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "WARNING: This step is expected to fail due to missing GLib in WebAssembly."
-          echo "Debug: Host OS reported as $(uname -s)"
-          echo "Debug: Emscripten version $(emcc --version)"
-          echo "Debug: Verifying cross-file exists..."
-          ls -l emscripten-cross.txt || { echo "Cross-file not found!"; exit 1; }
-          export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig"
-          echo "Debug: PKG_CONFIG_PATH set to $PKG_CONFIG_PATH"
-          pkg-config --modversion glib-2.0 || { echo "Error: glib-2.0 not found in host pkg-config path"; exit 1; }
+          echo "WARNING: This step is expected to fail due to missing GLib."
           CONFIGURE_CMD="emconfigure ./configure --target-list=${{ matrix.target }} --enable-tcg-interpreter --disable-xen"
-          echo "Running configure: $CONFIGURE_CMD"
           if eval "$CONFIGURE_CMD"; then
             echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
-            echo "QEMU configured for target: ${{ matrix.target }}"
           else
             echo "Configure failed due to GLib dependency (expected)."
-            echo "Dumping Meson log for reference..."
             if [ -f build/meson-logs/meson-log.txt ]; then
               cat build/meson-logs/meson-log.txt
             fi
-            echo "Use the 'prebuilt-qemu-js' job for a working WebAssembly solution."
             echo "CONFIGURE_SUCCEEDED=false" >> $GITHUB_ENV
           fi
         working-directory: .
@@ -154,7 +122,6 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
           emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1"
-          echo "QEMU build completed for target: ${{ matrix.target }}"
         working-directory: .
         timeout-minutes: 15
 
@@ -163,13 +130,10 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
-          ls -la
           if [ ! -f "qemu-system-${{ matrix.target }}" ]; then
             echo "Error: QEMU binary not found!"
             exit 1
           fi
-          echo "Testing QEMU binary for target: ${{ matrix.target }}"
-          node --version
           node qemu-system-${{ matrix.target }} --version || echo "Test failed, but continuing..."
         working-directory: .
 
@@ -184,17 +148,15 @@ jobs:
 
       - name: Cleanup
         run: |
-          echo "Cleaning up build files..."
           rm -rf qemu-${{ env.QEMU_VERSION }}
           rm -rf emsdk
-          echo "Cleanup completed."
 
       - name: Notify Build Status
         if: always()
         run: |
           echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
 
-  # Fetch and build Qemu.js to ensure artifacts (updated to generate binaries)
+  # Build Qemu.js using qemujs-builder
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -209,12 +171,9 @@ jobs:
 
       - name: Install Emscripten
         run: |
-          echo "Cloning Emscripten SDK..."
           git clone https://github.com/emscripten-core/emsdk.git
           cd emsdk
-          echo "Installing Emscripten latest..."
           ./emsdk install latest
-          echo "Activating Emscripten latest..."
           ./emsdk activate latest
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
@@ -222,48 +181,48 @@ jobs:
         working-directory: .
         timeout-minutes: 10
 
-      - name: Fetch and Build Qemu.js
+      - name: Install Build Tools
         run: |
-          echo "Fetching Qemu.js source..."
-          git clone https://github.com/atrosinenko/qemujs.git
-          cd qemujs
+          sudo apt-get update
+          sudo apt-get install -y build-essential wget jq
+
+      - name: Fetch and Build Qemu.js with qemujs-builder
+        run: |
+          echo "Fetching qemujs-builder..."
+          git clone https://github.com/atrosinenko/qemujs-builder.git
+          cd qemujs-builder
           echo "Listing directory contents..."
           ls -la
-          # Check for build script and run it
+          # Run build script
           if [ -f "build.sh" ]; then
-            echo "Found build.sh, attempting to build Qemu.js..."
+            echo "Running build.sh to generate Qemu.js binaries..."
             source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
             chmod +x build.sh
             ./build.sh || {
-              echo "Build failed, checking for pre-built binaries instead..."
-              ls -la qemu-system-*.js || echo "No pre-built binaries found either."
+              echo "Build failed, checking build directory..."
+              ls -la build
+              exit 1
             }
+            echo "Build completed, checking for binaries..."
+            ls -la build/qemu-system-*.js || {
+              echo "No qemu-system-*.js files found in build directory."
+              exit 1
+            }
+            # Copy binaries to a predictable location
+            mkdir -p ../qemujs-binaries
+            cp build/qemu-system-*.js ../qemujs-binaries/
+            cp build/*.html.mem ../qemujs-binaries/ 2>/dev/null || echo "No .html.mem files found."
+            cp build/*.data ../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
+            cp shell.html ../qemujs-binaries/ 2>/dev/null || echo "No shell.html found."
           else
-            echo "No build.sh found, checking for pre-built binaries..."
-            ls -la qemu-system-*.js || {
-              echo "No pre-built qemu-system-*.js files found in repo."
-              echo "Attempting to fetch from latest release..."
-              curl -s https://api.github.com/repos/atrosinenko/qemujs/releases/latest > release.json
-              ASSET_URL=$(jq -r '.assets[] | select(.name | endswith(".js")) | .browser_download_url' release.json | head -n 1)
-              if [ -n "$ASSET_URL" ]; then
-                echo "Downloading $ASSET_URL..."
-                wget "$ASSET_URL" -O qemu-system-i386.js
-                ls -la qemu-system-*.js
-              else
-                echo "No .js artifacts found in latest release."
-                exit 1
-              fi
-            }
-          fi
-          echo "Qemu.js version information (if available):"
-          if [ -f "qemu-system-i386.js" ]; then
-            node qemu-system-i386.js --version || echo "Version check not supported directly."
+            echo "No build.sh found in qemujs-builder!"
+            exit 1
           fi
         working-directory: .
 
       - name: Test Qemu.js Binary
         run: |
-          cd qemujs
+          cd qemujs-binaries
           echo "Testing Qemu.js binary..."
           if [ -f "qemu-system-i386.js" ]; then
             node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
@@ -276,15 +235,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-js-prebuilt
-          path: qemujs/qemu-system-*.js
-          if-no-files-found: error  # Fail if no files are found to catch issues early
+          path: qemujs-binaries/*
+          if-no-files-found: error
           retention-days: 7
 
       - name: Cleanup
         run: |
-          echo "Cleaning up Qemu.js files..."
-          rm -rf qemujs emsdk
-          echo "Cleanup completed."
+          rm -rf qemujs-builder emsdk qemujs-binaries
 
       - name: Notify Build Status
         if: always()
