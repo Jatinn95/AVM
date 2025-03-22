@@ -37,7 +37,6 @@ jobs:
           cd emsdk
           ./emsdk install ${{ env.EMSDK_VERSION }}
           ./emsdk activate ${{ env.EMSDK_VERSION }}
-          # Export the path to GITHUB_ENV for use in later steps
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           echo "Emscripten version: $(emcc --version)"
@@ -68,10 +67,10 @@ jobs:
 
       - name: Configure QEMU
         run: |
-          # Source Emscripten environment before configure
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
           ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
+            --host-cc=gcc --cross-prefix="" --disable-system --enable-softmmu \
             --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
             --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1"
           echo "QEMU configured for target: ${{ matrix.target }}"
@@ -79,7 +78,6 @@ jobs:
 
       - name: Build QEMU
         run: |
-          # Source Emscripten environment before build
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
           emmake make -j2 V=1
@@ -89,7 +87,6 @@ jobs:
 
       - name: Test QEMU Binary
         run: |
-          # Source Emscripten environment before test
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
           ls -la
