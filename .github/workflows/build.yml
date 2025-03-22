@@ -129,11 +129,15 @@ jobs:
           echo "Debug: Emscripten version $(emcc --version)"
           echo "Debug: Verifying cross-file exists..."
           ls -l emscripten-cross.txt || { echo "Cross-file not found!"; exit 1; }
-          # Use Emscripten's pkg-config path instead of host's
+          # Use Emscripten's pkg-config exclusively
           export PKG_CONFIG_PATH="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig"
+          export PKG_CONFIG_LIBDIR="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig"
+          unset PKG_CONFIG_PATH_DEFAULT  # Clear any system defaults if set
           echo "Debug: PKG_CONFIG_PATH set to $PKG_CONFIG_PATH"
-          pkg-config --modversion glib-2.0 || { echo "Error: glib-2.0 not found in Emscripten pkg-config path"; exit 1; }
-          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ --enable-tcg-interpreter --disable-xen"
+          echo "Debug: PKG_CONFIG_LIBDIR set to $PKG_CONFIG_LIBDIR"
+          # Use emconfigure to ensure Emscripten environment
+          emconfigure pkg-config --modversion glib-2.0 || { echo "Error: glib-2.0 not found in Emscripten pkg-config path"; exit 1; }
+          CONFIGURE_CMD="emconfigure ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ --enable-tcg-interpreter --disable-xen"
           echo "Running configure: $CONFIGURE_CMD"
           eval "$CONFIGURE_CMD" || {
             echo "Configure failed, dumping Meson log..."
