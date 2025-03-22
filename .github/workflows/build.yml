@@ -8,8 +8,8 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      QEMU_VERSION: "9.2.0"
-      EMSDK_VERSION: "latest"
+      QEMU_VERSION: "7.0.0"  # Updated to a compatible version
+      EMSDK_VERSION: "3.1.45"  # Use a stable version of Emscripten
       ARTIFACT_RETENTION_DAYS: 7
     steps:
       - name: Checkout Repository
@@ -18,7 +18,12 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build
+          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build \
+            pkg-config libtool automake autoconf cmake nodejs
+
+      - name: Install Sphinx (for documentation)
+        run: |
+          pip install sphinx sphinx_rtd_theme
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
@@ -36,23 +41,33 @@ jobs:
             git clone https://github.com/emscripten-core/emsdk.git
           fi
           cd emsdk
-          if [ ! -d "upstream/emscripten" ]; then
-            echo "Installing Emscripten ${{ env.EMSDK_VERSION }}..."
-            ./emsdk install ${{ env.EMSDK_VERSION }} || {
-              echo "Failed to install Emscripten, retrying once..."
-              ./emsdk install ${{ env.EMSDK_VERSION }}
-            }
-          else
-            echo "Emscripten directory exists, updating via git..."
-            git pull || echo "Git pull failed, proceeding with existing version..."
-          fi
+          echo "Installing Emscripten ${{ env.EMSDK_VERSION }}..."
+          ./emsdk install ${{ env.EMSDK_VERSION }} || {
+            echo "Failed to install Emscripten, retrying once..."
+            ./emsdk install ${{ env.EMSDK_VERSION }}
+          }
           echo "Activating Emscripten ${{ env.EMSDK_VERSION }}..."
           ./emsdk activate ${{ env.EMSDK_VERSION }}
-          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
+          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
+          echo "PATH=$PATH" >> $GITHUB_ENV  # Ensure PATH is propagated
           echo "Emscripten version: $(emcc --version)"
         working-directory: .
         timeout-minutes: 15
+
+      - name: Verify Emscripten Installation
+        run: |
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          emcc --version || {
+            echo "Error: emcc is not working!"
+            exit 1
+          }
+
+      - name: Debug Environment
+        run: |
+          echo "PATH: $PATH"
+          which emcc || echo "emcc not found in PATH"
+          emcc --version || echo "emcc is not working"
 
       - name: Cache QEMU Source
         id: cache-qemu
@@ -70,20 +85,18 @@ jobs:
           wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz || {
             echo "Error: Failed to download qemu-${{ env.QEMU_VERSION }}.tar.xz."
             echo "Check version availability at https://download.qemu.org/."
-            echo "Available versions might include 9.2.0 (Dec 2024) or newer."
+            echo "Available versions might include 7.0.0 or newer."
             exit 1
           }
           tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
           echo "QEMU source downloaded and extracted successfully."
         timeout-minutes: 10
 
-      - name: Patch QEMU Configure Script
+      - name: Patch QEMU Configuration Script
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "Patching configure script to bypass host OS check for emcc..."
-          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          grep -A 5 "Unrecognized host OS" configure  # Verify patch
-        working-directory: .
+          sed -i 's/^case "$(uname -s)" in/case "Linux" in/' configure
+          echo "Patched QEMU configuration script to recognize Linux host OS."
 
       - name: Configure QEMU
         run: |
@@ -91,12 +104,11 @@ jobs:
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Debug: Host OS reported as $(uname -s)"
           echo "Debug: Emscripten version $(emcc --version)"
-          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
-            --cross-prefix=em- \
-            --extra-cflags='-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1' \
-            --extra-ldflags='-s USE_SDL=2 -s EXPORTED_FUNCTIONS=[_main] -s EXPORTED_RUNTIME_METHODS=[ccall,cwrap] -s ALLOW_MEMORY_GROWTH=1'"
-          echo "Running: $CONFIGURE_CMD"
-          eval "$CONFIGURE_CMD"
+          echo "Configuring QEMU..."
+          ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
+            --host=emscripten --disable-system --disable-linux-user \
+            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
+            --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1"
           echo "QEMU configured for target: ${{ matrix.target }}"
         working-directory: .
 
