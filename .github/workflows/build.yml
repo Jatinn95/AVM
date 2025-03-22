@@ -51,11 +51,11 @@ jobs:
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           echo "Building glib port for Emscripten..."
-          # Build required ports (zlib is a dependency for glib)
-          ./emsdk/upstream/emscripten/embuilder.py build zlib
-          ./emsdk/upstream/emscripten/embuilder.py build glib || {
+          # Use absolute path and run with python3
+          python3 "${{ env.EMSDK_PATH }}/upstream/emscripten/embuilder.py" build zlib
+          python3 "${{ env.EMSDK_PATH }}/upstream/emscripten/embuilder.py" build glib || {
             echo "Failed to build glib, retrying once..."
-            ./emsdk/upstream/emscripten/embuilder.py build glib
+            python3 "${{ env.EMSDK_PATH }}/upstream/emscripten/embuilder.py" build glib
           }
           # Verify glib installation
           ls -l "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" || {
