@@ -1,5 +1,6 @@
 name: Build QEMU WebAssembly (Advanced)
 on: [push]
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -8,17 +9,29 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      QEMU_VERSION: "9.2.0"
       EMSDK_VERSION: "latest"
       ARTIFACT_RETENTION_DAYS: 7
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      - name: Fetch Latest QEMU Version
+        id: fetch-qemu-version
+        run: |
+          echo "Fetching latest QEMU version..."
+          QEMU_VERSION=$(curl -s https://download.qemu.org/ | grep -oP 'qemu-\K[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
+          if [ -z "$QEMU_VERSION" ]; then
+            echo "Error: Failed to fetch QEMU version."
+            exit 1
+          fi
+          echo "Latest QEMU version: $QEMU_VERSION"
+          echo "QEMU_VERSION=$QEMU_VERSION" >> $GITHUB_ENV
+        timeout-minutes: 5
+
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build
+          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build curl
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
@@ -68,7 +81,6 @@ jobs:
           wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz || {
             echo "Error: Failed to download qemu-${{ env.QEMU_VERSION }}.tar.xz."
             echo "Check version availability at https://download.qemu.org/."
-            echo "Available versions might include 9.2.0 (Dec 2024) or newer."
             exit 1
           }
           tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
@@ -106,14 +118,25 @@ jobs:
           fi
           echo "Testing QEMU binary for target: ${{ matrix.target }}"
           node --version
-          node qemu-system-${{ matrix.target }} --version || echo "Test failed, but continuing..."
+          echo "Running QEMU version check..."
+          node qemu-system-${{ matrix.target }} --version || {
+            echo "Test failed, but continuing..."
+            exit 0  # Continue even if the test fails
+          }
+        working-directory: .
+
+      - name: Compress Artifacts
+        run: |
+          cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
+          tar -czvf qemu-wasm-${{ matrix.target }}.tar.gz qemu-system-${{ matrix.target }}.*
+          echo "Artifact compressed: qemu-wasm-${{ matrix.target }}.tar.gz"
         working-directory: .
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-${{ matrix.target }}
-          path: qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.*
+          path: qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-wasm-${{ matrix.target }}.tar.gz
           if-no-files-found: error
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
@@ -128,3 +151,5 @@ jobs:
         if: always()
         run: |
           echo "Build completed for ${{ matrix.target }} with status: ${{ job.status }}"
+          # Add Slack or email notification here if needed
+          # Example: curl -X POST -H 'Content-type: application/json' --data '{"text":"Build status: ${{ job.status }}"}' https://hooks.slack.com/services/...
