@@ -94,13 +94,26 @@ jobs:
           echo "Patching meson.build to bypass compiler version check for Emscripten..."
           sed -i "s|error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|message('Allowing Emscripten: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|" meson.build
           echo "Patching meson.build to bypass GLIB_SIZEOF_SIZE_T check for Emscripten..."
-          sed -i "/if cc.compiles.*QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)/i if not meson.is_cross_build() or meson.get_cross_property('system') != 'emscripten'" meson.build
-          sed -i "/endif.*HAVE_GLIB_SIZEOF_SIZE_T_MATCH/a endif" meson.build
-          sed -i "/else.*sizeof(size_t) doesn't match GLIB_SIZEOF_SIZE_T/,/endif/d" meson.build
-          sed -i "/HAVE_GLIB_SIZEOF_SIZE_T_MATCH/a else\n  cdata.set('HAVE_GLIB_SIZEOF_SIZE_T_MATCH', 1)" meson.build
+          # Replace lines 1028-1038 with conditional for Emscripten
+          sed -i '1028,1038c\
+          if not meson.is_cross_build() or meson.get_cross_property('"'"'system'"'"') != '"'"'emscripten'"'"'\
+            if cc.compiles('"'"'#include <glib.h>\n#include <unistd.h>\n#define QEMU_BUILD_BUG_ON(x) \\\n typedef char qemu_build_bug_on[(x)?-1:1] __attribute__((unused));\nint main(void) {\n QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T);\n return 0;\n}'"'"', dependencies: glib_dep)\
+              cdata.set('"'"'HAVE_GLIB_SIZEOF_SIZE_T_MATCH'"'"', 1)\
+            else\
+              error('"'"'sizeof(size_t) doesn\'t match GLIB_SIZEOF_SIZE_T.\n'"'"' +\
+                    '"'"'You probably need to set PKG_CONFIG_LIBDIR to point\n'"'"' +\
+                    '"'"'to the right pkg-config files for your build target.'"'"')\
+            endif\
+          else\
+            cdata.set('"'"'HAVE_GLIB_SIZEOF_SIZE_T_MATCH'"'"', 1)\
+          endif' meson.build
           echo "Verifying patches:"
           sed -n '320,340p' meson.build  # Compiler version patch context
           sed -n '1020,1040p' meson.build  # GLIB_SIZEOF_SIZE_T patch context
+          if ! grep -q "meson.is_cross_build" meson.build; then
+            echo "Error: Patch failed to apply, meson.is_cross_build not found!"
+            exit 1
+          fi
         working-directory: .
 
       - name: Create Meson Cross-File
