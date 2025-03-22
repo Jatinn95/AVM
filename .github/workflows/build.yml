@@ -50,6 +50,11 @@ jobs:
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
+          echo "Installing glib port for Emscripten..."
+          ./emsdk install glib || {
+            echo "Failed to install glib, retrying once..."
+            ./emsdk install glib
+          }
           echo "Emscripten version: $(emcc --version)"
         working-directory: .
         timeout-minutes: 15
@@ -135,7 +140,7 @@ jobs:
           unset PKG_CONFIG_PATH_DEFAULT  # Clear any system defaults if set
           echo "Debug: PKG_CONFIG_PATH set to $PKG_CONFIG_PATH"
           echo "Debug: PKG_CONFIG_LIBDIR set to $PKG_CONFIG_LIBDIR"
-          # Use emconfigure to ensure Emscripten environment
+          # Verify glib availability
           emconfigure pkg-config --modversion glib-2.0 || { echo "Error: glib-2.0 not found in Emscripten pkg-config path"; exit 1; }
           CONFIGURE_CMD="emconfigure ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ --enable-tcg-interpreter --disable-xen"
           echo "Running configure: $CONFIGURE_CMD"
