@@ -83,11 +83,12 @@ jobs:
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Debug: Host OS reported as $(uname -s)"
           echo "Debug: Emscripten version $(emcc --version)"
-          echo "Configuring QEMU..."
-          ./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
-            --host=emscripten --disable-system --disable-linux-user \
-            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
-            --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1"
+          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
+            --cross-prefix=em- --disable-system --disable-linux-user \
+            --extra-cflags='-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1' \
+            --extra-ldflags='-s USE_SDL=2 -s EXPORTED_FUNCTIONS=[_main] -s EXPORTED_RUNTIME_METHODS=[ccall,cwrap] -s ALLOW_MEMORY_GROWTH=1'"
+          echo "Running: $CONFIGURE_CMD"
+          eval "$CONFIGURE_CMD"
           echo "QEMU configured for target: ${{ matrix.target }}"
         working-directory: .
 
