@@ -80,9 +80,11 @@ jobs:
       - name: Patch QEMU Configure Script
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "Patching configure script to bypass host OS check for emcc..."
+          echo "Patching configure script to bypass host OS check and use cross-file..."
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          grep -A 5 "Unrecognized host OS" configure  # Verify patch
+          sed -i '/meson setup/ s|$| --cross-file emscripten-cross.txt|' configure
+          grep -A 5 "Unrecognized host OS" configure  # Verify host OS patch
+          grep "meson setup" configure  # Verify cross-file injection
         working-directory: .
 
       - name: Create Meson Cross-File
@@ -115,22 +117,15 @@ jobs:
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Debug: Host OS reported as $(uname -s)"
           echo "Debug: Emscripten version $(emcc --version)"
-          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ \
-            --cross-prefix=em- \
-            --extra-cflags='-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1' \
-            --extra-ldflags='-s USE_SDL=2 -s EXPORTED_FUNCTIONS=\"[_main]\" -s EXPORTED_RUNTIME_METHODS=\"[ccall,cwrap]\" -s ALLOW_MEMORY_GROWTH=1'"
-          echo "Running initial configure: $CONFIGURE_CMD"
+          CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++"
+          echo "Running configure: $CONFIGURE_CMD"
           eval "$CONFIGURE_CMD" || {
-            echo "Initial configure failed, checking for Meson log..."
+            echo "Configure failed, dumping Meson log..."
             if [ -f build/meson-logs/meson-log.txt ]; then
               cat build/meson-logs/meson-log.txt
+            else
+              echo "No Meson log available."
             fi
-            exit 1
-          }
-          echo "Reconfiguring Meson with cross-file..."
-          meson setup --reconfigure --cross-file emscripten-cross.txt build || {
-            echo "Meson reconfigure failed, dumping log..."
-            cat build/meson-logs/meson-log.txt
             exit 1
           }
           echo "QEMU configured for target: ${{ matrix.target }}"
@@ -140,7 +135,7 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
-          emmake make -j2 V=1
+          emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1"
           echo "QEMU build completed for target: ${{ matrix.target }}"
         working-directory: .
         timeout-minutes: 15
