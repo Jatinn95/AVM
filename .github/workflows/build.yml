@@ -92,8 +92,7 @@ jobs:
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Patching meson.build to bypass compiler version check for Emscripten..."
-          sed -i "/You either need GCC/ s/error(/message('Allowing Emscripten: /" meson.build
-          sed -i "/Allowing Emscripten:/ s/)$/')/" meson.build
+          sed -i "s|error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|message('Allowing Emscripten: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|" meson.build
           echo "Verifying patch around line 328:"
           sed -n '320,340p' meson.build  # Show broader context around the patched line
         working-directory: .
