@@ -80,9 +80,10 @@ jobs:
       - name: Patch QEMU Configure Script
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "Patching configure script to bypass host OS check and use cross-file..."
+          echo "Patching configure script to bypass host OS check and use absolute cross-file path..."
+          CROSS_FILE_PATH="$(pwd)/emscripten-cross.txt"
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          sed -i '/meson setup/ s|$| --cross-file emscripten-cross.txt|' configure
+          sed -i "/meson setup/ s|$| --cross-file $CROSS_FILE_PATH|" configure
           grep -A 5 "Unrecognized host OS" configure  # Verify host OS patch
           grep "meson setup" configure  # Verify cross-file injection
         working-directory: .
@@ -107,7 +108,7 @@ jobs:
           cpu = 'wasm32'
           endian = 'little'
           EOF
-          echo "Created Meson cross-file:"
+          echo "Created Meson cross-file at $(pwd)/emscripten-cross.txt:"
           cat emscripten-cross.txt
         working-directory: .
 
@@ -117,6 +118,8 @@ jobs:
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Debug: Host OS reported as $(uname -s)"
           echo "Debug: Emscripten version $(emcc --version)"
+          echo "Debug: Verifying cross-file exists..."
+          ls -l emscripten-cross.txt || { echo "Cross-file not found!"; exit 1; }
           CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++"
           echo "Running configure: $CONFIGURE_CMD"
           eval "$CONFIGURE_CMD" || {
