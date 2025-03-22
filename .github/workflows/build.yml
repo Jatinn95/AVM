@@ -50,11 +50,19 @@ jobs:
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
-          echo "Installing glib port for Emscripten..."
-          ./emsdk install glib || {
-            echo "Failed to install glib, retrying once..."
-            ./emsdk install glib
+          echo "Building glib port for Emscripten..."
+          # Build required ports (zlib is a dependency for glib)
+          ./emsdk/upstream/emscripten/embuilder.py build zlib
+          ./emsdk/upstream/emscripten/embuilder.py build glib || {
+            echo "Failed to build glib, retrying once..."
+            ./emsdk/upstream/emscripten/embuilder.py build glib
           }
+          # Verify glib installation
+          ls -l "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" || {
+            echo "Error: glib-2.0.pc not found after building glib port!"
+            exit 1
+          }
+          echo "glib port installed successfully."
           echo "Emscripten version: $(emcc --version)"
         working-directory: .
         timeout-minutes: 15
