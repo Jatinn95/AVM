@@ -129,6 +129,10 @@ jobs:
           echo "Debug: Emscripten version $(emcc --version)"
           echo "Debug: Verifying cross-file exists..."
           ls -l emscripten-cross.txt || { echo "Cross-file not found!"; exit 1; }
+          # Set PKG_CONFIG_LIBDIR to Emscripten's pkg-config path
+          export PKG_CONFIG_LIBDIR="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig"
+          echo "Debug: PKG_CONFIG_LIBDIR set to $PKG_CONFIG_LIBDIR"
+          pkg-config --modversion glib-2.0 || echo "Warning: glib-2.0 not found in Emscripten pkg-config path"
           CONFIGURE_CMD="./configure --target-list=${{ matrix.target }} --cc=emcc --cxx=em++ --enable-tcg-interpreter"
           echo "Running configure: $CONFIGURE_CMD"
           eval "$CONFIGURE_CMD" || {
