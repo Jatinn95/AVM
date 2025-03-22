@@ -94,7 +94,7 @@ jobs:
           echo "Patching meson.build to bypass compiler version check for Emscripten..."
           sed -i "s|error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|message('Allowing Emscripten: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|" meson.build
           echo "Patching meson.build to bypass GLIB_SIZEOF_SIZE_T check for Emscripten..."
-          sed -i "/QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)/ s|^|if not meson.is_cross_build() or meson.get_cross_property('system') != 'emscripten'\n  |; s|$|\nendif|" meson.build
+          sed -i "/QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T)/ { s|^|if not meson.is_cross_build() or meson.get_cross_property('system') != 'emscripten'\n  |; s|$|\nendif|; }" meson.build
           echo "Verifying patches:"
           sed -n '320,340p' meson.build  # Compiler version patch context
           sed -n '1020,1040p' meson.build  # GLIB_SIZEOF_SIZE_T patch context
