@@ -18,7 +18,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python2.7 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev
+          sudo apt-get install -y build-essential python2.7 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev
           sudo ln -sf /usr/bin/python2.7 /usr/bin/python
           python --version
 
@@ -101,10 +101,12 @@ jobs:
       - name: Configure QEMU
         id: configure
         run: |
+          set -x  # Enable shell tracing
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          emcc --version  # Verify Emscripten is working
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Configuring QEMU with Python 2.7 for ${{ matrix.target }}..."
-          CONFIGURE_CMD="emconfigure ./configure --python=/usr/bin/python2.7 --target-list=${{ matrix.target }} --enable-tcg-interpreter --disable-xen"
+          CONFIGURE_CMD="emconfigure ./configure --python=/usr/bin/python2.7 --target-list=${{ matrix.target }} --disable-xen"
           echo "Running: $CONFIGURE_CMD"
           if eval "$CONFIGURE_CMD"; then
             echo "Configure succeeded."
@@ -123,6 +125,7 @@ jobs:
       - name: Build QEMU
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
+          set -x
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
           echo "Building QEMU for ${{ matrix.target }}..."
@@ -195,12 +198,13 @@ jobs:
       - name: Install Build Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python2.7 git ninja-build libsdl2-dev libglib2.0-dev libpixman-1-dev zlib1g-dev libfdt-dev
+          sudo apt-get install -y build-essential python2.7 git ninja-build libsdl2-dev libglib2.0-dev libpixman-1-dev zlib1g-dev libfdt-dev libcap-dev libattr1-dev
           sudo ln -sf /usr/bin/python2.7 /usr/bin/python
           python --version
 
       - name: Fetch and Build Qemu.js with qemujs-builder
         run: |
+          set -x
           echo "Fetching qemujs-builder..."
           git clone https://github.com/atrosinenko/qemujs-builder.git
           cd qemujs-builder
@@ -214,7 +218,8 @@ jobs:
           cd build-emscripten
           echo "Configuring QEMU for Emscripten..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          CONFIGURE_CMD="emconfigure ../configure --python=/usr/bin/python2.7 --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen"
+          emcc --version
+          CONFIGURE_CMD="emconfigure ../configure --python=/usr/bin/python2.7 --target-list=i386-softmmu --disable-xen"
           echo "Running: $CONFIGURE_CMD"
           eval "$CONFIGURE_CMD" || {
             echo "Error: Configuration failed! See logs above."
