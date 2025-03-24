@@ -5,7 +5,7 @@ on: [push]
 jobs:
   build-qemu-js:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30  # Increased due to build time
     steps:
       # Step 1: Checkout the repository code
       - name: Checkout Repository
@@ -17,7 +17,13 @@ jobs:
         with:
           node-version: '20'
 
-      # Step 3: Install Emscripten (optional for future custom builds)
+      # Step 3: Install Build Dependencies
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git python3 ninja-build libsdl2-dev libglib2.0-dev
+
+      # Step 4: Install Emscripten
       - name: Install Emscripten
         run: |
           git clone https://github.com/emscripten-core/emsdk.git
@@ -26,62 +32,40 @@ jobs:
           ./emsdk activate latest
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
-          echo "Emscripten version: $(emcc --version)"
+          emcc --version
         working-directory: .
-        timeout-minutes: 10
 
-      # Step 4: Install basic build tools
-      - name: Install Build Tools
+      # Step 5: Build QEMU WebAssembly with qemujs-builder
+      - name: Build QEMU WebAssembly
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential git python3 ninja-build
+          git clone https://github.com/atrosinenko/qemujs-builder.git
+          cd qemujs-builder
+          git submodule update --init qemu
+          cd qemu
+          # Source Emscripten environment
+          source ../../emsdk/emsdk_env.sh
+          # Configure and build
+          emconfigure ./configure --target-list=i386-softmmu --enable-sdl
+          emmake make -j$(nproc)
+          # Verify output
+          ls -lh i386-softmmu/
+          if [ ! -f "i386-softmmu/qemu-system-i386.js" ] || [ ! -f "i386-softmmu/qemu-system-i386.wasm" ]; then
+            echo "Error: Build failed to produce qemu-system-i386.js or qemu-system-i386.wasm!"
+            exit 1
+          fi
+          echo "QEMU build completed successfully."
+        working-directory: .
 
-      # Step 5: Fetch or Verify Qemu.js and WASM
-      - name: Fetch or Verify Qemu.js and WASM
+      # Step 6: Copy Built Files to Artifacts Directory
+      - name: Prepare QEMU Artifacts
         run: |
           mkdir -p qemujs-binaries
-          # Download qemu-system-i386.js from original source (working as of 2025-03-24)
-          wget -O qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-            echo "Failed to download qemu-system-i386.js from original source!"
-            cp ../qemu-system-i386.js qemujs-binaries/ 2>/dev/null || {
-              echo "No local qemu-system-i386.js found in repository! Please add it."
-              exit 1
-            }
-          }
-          echo "qemu-system-i386.js downloaded successfully."
-          # Check for qemu-system-i386.wasm in repo root (must be manually added)
-          echo "Checking for qemu-system-i386.wasm in repository root..."
-          if [ -f "../qemu-system-i386.wasm" ]; then
-            cp ../qemu-system-i386.wasm qemujs-binaries/
-            echo "qemu-system-i386.wasm found and copied successfully."
-          else
-            echo "ERROR: qemu-system-i386.wasm not found in repository root!"
-            echo "The original source (https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm) is 404."
-            echo "You’ve confirmed your download only included qemu-system-i386.js, so .wasm must be manually sourced."
-            echo "Please add qemu-system-i386.wasm to the repository root with:"
-            echo "  git add qemu-system-i386.wasm"
-            echo "  git commit -m 'Add qemu-system-i386.wasm'"
-            echo "  git push"
-            echo "How to obtain it:"
-            echo "1. Build it with qemujs-builder (recommended):"
-            echo "   - git clone https://github.com/atrosinenko/qemujs-builder.git"
-            echo "   - cd qemujs-builder; git submodule update --init qemu"
-            echo "   - cd qemu; emconfigure ./configure --target-list=i386-softmmu --enable-sdl; emmake make"
-            echo "   - Copy i386-softmmu/qemu-system-i386.wasm to your repo."
-            echo "2. Check https://github.com/atrosinenko/qemujs-demo/issues for alternative sources."
-            echo "Workflow will fail until .wasm is added, as QEMU requires both files to run."
-            exit 1
-          fi
+          cp qemujs-builder/qemu/i386-softmmu/qemu-system-i386.js qemujs-binaries/
+          cp qemujs-builder/qemu/i386-softmmu/qemu-system-i386.wasm qemujs-binaries/
           ls -la qemujs-binaries
-          # Ensure both files are present
-          if [ ! -f "qemujs-binaries/qemu-system-i386.js" ] || [ ! -f "qemujs-binaries/qemu-system-i386.wasm" ]; then
-            echo "Error: Missing one or both QEMU files!"
-            exit 1
-          fi
-          echo "Both qemu-system-i386.js and qemu-system-i386.wasm are ready."
-        working-directory: .
+          echo "Both qemu-system-i386.js and qemu-system-i386.wasm prepared."
 
-      # Step 6: Test Qemu.js Binary
+      # Step 7: Test Qemu.js Binary
       - name: Test Qemu.js Binary
         run: |
           cd qemujs-binaries
@@ -93,29 +77,29 @@ jobs:
           fi
         working-directory: .
 
-      # Step 7: Upload Qemu.js Artifacts
+      # Step 8: Upload Qemu.js Artifacts
       - name: Upload Qemu.js Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: qemu-js-prebuilt
           path: qemujs-binaries/*
-          if-no-files-found: error  # Fail if files are missing
+          if-no-files-found: error
           retention-days: 7
 
-      # Step 8: Cleanup
+      # Step 9: Cleanup
       - name: Cleanup
         run: |
-          rm -rf emsdk qemujs-binaries
+          rm -rf emsdk qemujs-builder qemujs-binaries
 
-  # Step 9: Notify Build Status with Usage Notes
+      # Step 10: Notify Build Status with Usage Notes
       - name: Notify Build Status
         if: always()
         run: |
           echo "Qemu.js build job completed with status: ${{ job.status }}"
           echo "Next steps:"
-          echo "1. Add qemu-system-i386.wasm to the repository root (missing from your download) and rerun."
-          echo "2. Download artifacts (qemu-system-i386.js and .wasm) and place with index.html."
-          echo "3. Customize an Android-x86 ISO with ADB:"
+          echo "1. Download artifacts (qemu-system-i386.js and .wasm) and place with index.html."
+          echo "2. Customize an Android-x86 ISO with ADB:"
           echo "   - Extract ISO, unsquash system.sfs, add adbd to /system/bin/, enable USB debugging in build.prop, repack."
           echo "   - See: https://android-x86.org for ISO downloads."
-          echo
+          echo "3. Update index.html to forward ADB port: Add '-net user,hostfwd=tcp::5555-:5555' to Module.arguments."
+          echo "4. Run locally: python -m http.server 8000, then use 'adb connect localhost:5555' for shell access."
