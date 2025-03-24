@@ -1,7 +1,6 @@
 name: Build QEMU WebAssembly (Advanced)
 on: [push]
 jobs:
-  # Attempt to build QEMU from source (expected to fail due to GLib)
   build-from-source:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -122,6 +121,8 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
           emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1"
+          echo "Listing built files:"
+          ls -lh ${{ matrix.target }}/qemu-system-${{ matrix.target }}*
         working-directory: .
         timeout-minutes: 15
 
@@ -130,8 +131,8 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
-          if [ ! -f "qemu-system-${{ matrix.target }}" ]; then
-            echo "Error: QEMU binary not found!"
+          if [ ! -f "qemu-system-${{ matrix.target }}.wasm" ]; then
+            echo "Error: QEMU .wasm binary not found!"
             exit 1
           fi
           node qemu-system-${{ matrix.target }} --version || echo "Test failed, but continuing..."
@@ -142,7 +143,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-${{ matrix.target }}
-          path: qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.*
+          path: |
+            qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.js
+            qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
           if-no-files-found: error
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
@@ -207,9 +210,12 @@ jobs:
             echo "Error: Build failed!"
             exit 1
           }
+          echo "Listing built files:"
+          ls -lh i386-softmmu/qemu-system-i386*
           echo "Copying build outputs..."
           mkdir -p ../../qemujs-binaries
-          cp qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: qemu-system-i386.js not found!"
+          cp i386-softmmu/qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: qemu-system-i386.js not found!"
+          cp i386-softmmu/qemu-system-i386.wasm ../../qemujs-binaries/ || echo "Warning: qemu-system-i386.wasm not found!"
           cp *.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
           cp shell.html ../../qemujs-binaries/ 2>/dev/null || echo "No shell.html found, creating a basic one..."
           if [ ! -f ../../qemujs-binaries/shell.html ]; then
@@ -227,19 +233,22 @@ jobs:
         run: |
           cd qemujs-binaries
           echo "Testing Qemu.js binary..."
-          if [ -f "qemu-system-i386.js" ]; then
-            node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
-          else
-            echo "Error: qemu-system-i386.js not found!"
+          if [ ! -f "qemu-system-i386.wasm" ]; then
+            echo "Error: qemu-system-i386.wasm not found!"
             exit 1
           fi
+          node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
         working-directory: .
 
       - name: Upload Qemu.js Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: qemu-js-prebuilt
-          path: qemujs-binaries/*
+          path: |
+            qemujs-binaries/qemu-system-i386.js
+            qemujs-binaries/qemu-system-i386.wasm
+            qemujs-binaries/shell.html
+            qemujs-binaries/*.data
           if-no-files-found: error
           retention-days: 7
 
