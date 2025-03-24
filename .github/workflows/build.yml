@@ -194,7 +194,7 @@ jobs:
         run: |
           echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
 
-  # Fetch and use pre-built Qemu.js (with GLib workaround and WASM output)
+  # Fetch and use pre-built Qemu.js (with GLib patch and WASM output)
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -230,10 +230,12 @@ jobs:
           echo "Patching configure script to bypass host OS and GLib checks..."
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
           sed -i '/sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T/{s/exit 1/echo "Skipping GLib size check for WebAssembly"/;}' configure
+          echo "Verifying GLib patch..."
+          grep -A 5 "sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T" configure
           echo "Configuring Qemu.js for WebAssembly..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           export PKG_CONFIG_LIBDIR=""
-          emconfigure ./configure --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen --disable-guest-agent --disable-docs --disable-tools --enable-system --disable-user --disable-glib || {
+          emconfigure ./configure --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen --disable-guest-agent --disable-docs --disable-tools --enable-system --disable-user || {
             echo "Configure failed; proceeding to check output..."
           }
           echo "Building Qemu.js binaries with WASM output..."
