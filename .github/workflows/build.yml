@@ -36,29 +36,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git python3 ninja-build
 
-      # Step 5: Fetch Pre-built Qemu.js and WASM with fallback
+      # Step 5: Fetch Pre-built Qemu.js and WASM with enforced local fallback
       - name: Fetch Pre-built Qemu.js and WASM
         run: |
           mkdir -p qemujs-binaries
           # Download qemu-system-i386.js from original source
           wget -O qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
             echo "Failed to download qemu-system-i386.js from original source!"
-            # Fallback to a local copy or alternative source if added to repo
             cp ../qemu-system-i386.js qemujs-binaries/ 2>/dev/null || {
-              echo "No local qemu-system-i386.js found in repository!"
+              echo "No local qemu-system-i386.js found in repository! Please add it."
               exit 1
             }
           }
-          # Attempt to download qemu-system-i386.wasm (noting it’s currently 404)
-          wget -O qemujs-binaries/qemu-system-i386.wasm https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm || {
-            echo "Original qemu-system-i386.wasm not found (404), trying fallback..."
-            # Replace with your hosted URL or local copy
-            # Example: wget -O qemujs-binaries/qemu-system-i386.wasm https://github.com/<your-username>/<your-repo>/raw/main/qemu-system-i386.wasm
-            cp ../qemu-system-i386.wasm qemujs-binaries/ || {
-              echo "Failed to find qemu-system-i386.wasm! Please add it to the repository root or update the URL."
-              echo "See: https://github.com/atrosinenko/qemujs-demo/issues for updates or build it manually with qemujs-builder."
-              exit 1
-            }
+          # Skip original wasm download (404) and rely on local copy
+          echo "Note: Skipping https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm (404 Not Found)"
+          cp ../qemu-system-i386.wasm qemujs-binaries/ || {
+            echo "Failed to find qemu-system-i386.wasm in repository root!"
+            echo "You must add qemu-system-i386.wasm to the repository root."
+            echo "Options:"
+            echo "1. Download from a working source and commit it."
+            echo "2. Build it with qemujs-builder: https://github.com/atrosinenko/qemujs-builder"
+            echo "3. Check https://github.com/atrosinenko/qemujs-demo/issues for updates."
+            exit 1
           }
           ls -la qemujs-binaries
           # Verify both files exist
@@ -100,9 +99,10 @@ jobs:
         run: |
           echo "Qemu.js build job completed with status: ${{ job.status }}"
           echo "Next steps:"
-          echo "1. Download artifacts (qemu-system-i386.js and .wasm) and place them with index.html."
-          echo "2. Customize an Android-x86 ISO with ADB:"
+          echo "1. Ensure qemu-system-i386.wasm is in the repository root before running this workflow."
+          echo "2. Download artifacts (qemu-system-i386.js and .wasm) and place them with index.html."
+          echo "3. Customize an Android-x86 ISO with ADB:"
           echo "   - Extract ISO, unsquash system.sfs, add adbd to /system/bin/, enable USB debugging in build.prop, repack."
           echo "   - See: https://android-x86.org for ISO downloads."
-          echo "3. Update index.html to forward ADB port: Add '-net user,hostfwd=tcp::5555-:5555' to Module.arguments."
-          echo "4. Run locally: python -m http.server 8000, then use 'adb connect localhost:5555' for shell access."
+          echo "4. Update index.html to forward ADB port: Add '-net user,hostfwd=tcp::5555-:5555' to Module.arguments."
+          echo "5. Run locally: python -m http.server 8000, then use 'adb connect localhost:5555' for shell access."
