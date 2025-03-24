@@ -207,13 +207,11 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Fetch and Build Qemu.js Pre-built Binaries
+      - name: Fetch Qemu.js Pre-built Binaries
         run: |
           echo "Fetching pre-built Qemu.js binaries..."
           git clone https://github.com/atrosinenko/qemujs.git
           cd qemujs
-          npm install  # Add this if the repo requires it; check qemujs README
-          npm run build  # Replace with actual build command from qemujs docs if needed
           echo "Listing available binaries..."
           ls -la
           echo "Qemu.js version information (if available):"
