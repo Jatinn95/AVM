@@ -17,13 +17,19 @@ jobs:
         with:
           node-version: '20'
 
-      # Step 3: Install Build Dependencies
+      # Step 3: Install Python 2.7
+      - name: Install Python 2.7
+        uses: actions/setup-python@v5
+        with:
+          python-version: '2.7'  # Matches QEMU’s requirement (2.4–2.7)
+
+      # Step 4: Install Build Dependencies
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git python3 ninja-build libsdl2-dev libglib2.0-dev
+          sudo apt-get install -y build-essential git python ninja-build libsdl2-dev libglib2.0-dev
 
-      # Step 4: Install Emscripten
+      # Step 5: Install Emscripten
       - name: Install Emscripten
         run: |
           git clone https://github.com/emscripten-core/emsdk.git
@@ -35,7 +41,7 @@ jobs:
           emcc --version
         working-directory: .
 
-      # Step 5: Build QEMU WebAssembly with qemujs-builder
+      # Step 6: Build QEMU WebAssembly with qemujs-builder
       - name: Build QEMU WebAssembly
         run: |
           git clone https://github.com/atrosinenko/qemujs-builder.git
@@ -44,8 +50,8 @@ jobs:
           cd qemu
           # Source Emscripten environment
           source ../../emsdk/emsdk_env.sh
-          # Configure and build
-          emconfigure ./configure --target-list=i386-softmmu --enable-sdl
+          # Configure with explicit Python 2.7
+          emconfigure ./configure --target-list=i386-softmmu --enable-sdl --python=/usr/bin/python2.7
           emmake make -j$(nproc)
           # Verify output
           ls -lh i386-softmmu/
@@ -56,7 +62,7 @@ jobs:
           echo "QEMU build completed successfully."
         working-directory: .
 
-      # Step 6: Copy Built Files to Artifacts Directory
+      # Step 7: Copy Built Files to Artifacts Directory
       - name: Prepare QEMU Artifacts
         run: |
           mkdir -p qemujs-binaries
@@ -65,7 +71,7 @@ jobs:
           ls -la qemujs-binaries
           echo "Both qemu-system-i386.js and qemu-system-i386.wasm prepared."
 
-      # Step 7: Test Qemu.js Binary
+      # Step 8: Test Qemu.js Binary
       - name: Test Qemu.js Binary
         run: |
           cd qemujs-binaries
@@ -77,7 +83,7 @@ jobs:
           fi
         working-directory: .
 
-      # Step 8: Upload Qemu.js Artifacts
+      # Step 9: Upload Qemu.js Artifacts
       - name: Upload Qemu.js Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -86,12 +92,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # Step 9: Cleanup
+      # Step 10: Cleanup
       - name: Cleanup
         run: |
           rm -rf emsdk qemujs-builder qemujs-binaries
 
-      # Step 10: Notify Build Status with Usage Notes
+      # Step 11: Notify Build Status with Usage Notes
       - name: Notify Build Status
         if: always()
         run: |
