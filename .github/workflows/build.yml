@@ -226,18 +226,20 @@ jobs:
           cd qemujs
           echo "Installing build dependencies..."
           sudo apt-get update
-          sudo apt-get install -y make
-          echo "Building Qemu.js binaries..."
+          sudo apt-get install -y make build-essential python3
+          echo "Configuring Qemu.js for WebAssembly..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          make  # Use the repo's Makefile to build
+          emconfigure ./configure --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen
+          echo "Building Qemu.js binaries..."
+          emmake make -j2
           echo "Listing available binaries..."
-          ls -la
+          ls -la i386-softmmu/  # Check where the binary is output
           echo "Qemu.js version information (if available):"
-          if [ -f "qemu-system-i386.js" ]; then
-            node qemu-system-i386.js --version || echo "Version check not supported directly."
+          if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
+            node i386-softmmu/qemu-system-i386.js --version || echo "Version check not supported directly."
           else
-            echo "Expected binary qemu-system-i386.js not found, listing directory contents:"
-            ls -la
+            echo "Expected binary i386-softmmu/qemu-system-i386.js not found, listing directory contents:"
+            ls -la i386-softmmu/
           fi
         working-directory: .
 
@@ -245,10 +247,10 @@ jobs:
         run: |
           cd qemujs
           echo "Testing Qemu.js pre-built binary..."
-          if [ -f "qemu-system-i386.js" ]; then
-            node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
+          if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
+            node i386-softmmu/qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
           else
-            echo "Error: qemu-system-i386.js not found, skipping test."
+            echo "Error: i386-softmmu/qemu-system-i386.js not found, skipping test."
           fi
         working-directory: .
 
@@ -256,7 +258,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-js-prebuilt
-          path: qemujs/qemu-system-*.js
+          path: qemujs/i386-softmmu/qemu-system-i386.js
           if-no-files-found: warn
           retention-days: 7
 
