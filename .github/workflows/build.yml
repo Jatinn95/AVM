@@ -194,7 +194,7 @@ jobs:
         run: |
           echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
 
-  # Fetch and use pre-built Qemu.js (with GLib workaround and corrected target)
+  # Fetch and use pre-built Qemu.js (with corrected system target)
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -233,7 +233,7 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           # Set PKG_CONFIG_LIBDIR to empty to avoid host GLib
           export PKG_CONFIG_LIBDIR=""
-          emconfigure ./configure --target-list=i386-linux-user --enable-tcg-interpreter --disable-xen --disable-guest-agent --disable-docs --disable-tools --disable-system --enable-user --disable-linux-user --disable-bsd-user || {
+          emconfigure ./configure --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen --disable-guest-agent --disable-docs --disable-tools --enable-system --disable-user || {
             echo "Configure failed; proceeding to check output..."
           }
           echo "Building Qemu.js binaries..."
@@ -241,13 +241,13 @@ jobs:
             echo "Make failed; checking for partial output..."
           }
           echo "Listing available binaries..."
-          ls -la i386-linux-user/  # Adjusted for user-mode target
+          ls -la i386-softmmu/  # System target directory
           echo "Qemu.js version information (if available):"
-          if [ -f "i386-linux-user/qemu-i386.js" ]; then
-            node i386-linux-user/qemu-i386.js --version || echo "Version check not supported directly."
+          if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
+            node i386-softmmu/qemu-system-i386.js --version || echo "Version check not supported directly."
           else
-            echo "Expected binary i386-linux-user/qemu-i386.js not found, listing directory contents:"
-            ls -la i386-linux-user/
+            echo "Expected binary i386-softmmu/qemu-system-i386.js not found, listing directory contents:"
+            ls -la i386-softmmu/
           fi
         working-directory: .
 
@@ -255,10 +255,10 @@ jobs:
         run: |
           cd qemujs
           echo "Testing Qemu.js pre-built binary..."
-          if [ -f "i386-linux-user/qemu-i386.js" ]; then
-            node i386-linux-user/qemu-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
+          if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
+            node i386-softmmu/qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
           else
-            echo "Error: i386-linux-user/qemu-i386.js not found, skipping test."
+            echo "Error: i386-softmmu/qemu-system-i386.js not found, skipping test."
           fi
         working-directory: .
 
@@ -266,7 +266,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-js-prebuilt
-          path: qemujs/i386-linux-user/qemu-i386.js
+          path: qemujs/i386-softmmu/qemu-system-i386.js
           if-no-files-found: warn
           retention-days: 7
 
