@@ -1,24 +1,23 @@
 name: Build QEMU WebAssembly for APK Runner
 
-# Trigger the workflow on push events
 on: [push]
 
 jobs:
   build-qemu-js:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # Set a reasonable timeout for the job
+    timeout-minutes: 15
     steps:
       # Step 1: Checkout the repository code
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step 2: Set up Node.js environment (required to test Qemu.js)
+      # Step 2: Install Node.js for testing Qemu.js
       - name: Install Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20'  # Use Node.js 20 for compatibility
+          node-version: '20'
 
-      # Step 3: Install Emscripten (required if you later decide to build from source)
+      # Step 3: Install Emscripten (optional for future custom builds)
       - name: Install Emscripten
         run: |
           git clone https://github.com/emscripten-core/emsdk.git
@@ -37,24 +36,39 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git python3 ninja-build
 
-      # Step 5: Fetch pre-built Qemu.js and WASM files
-      - name: Fetch Pre-built Qemu.js
+      # Step 5: Fetch Pre-built Qemu.js and WASM with fallback
+      - name: Fetch Pre-built Qemu.js and WASM
         run: |
           mkdir -p qemujs-binaries
-          # Download the JavaScript wrapper
+          # Download qemu-system-i386.js from original source
           wget -O qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-            echo "Failed to download pre-built qemu-system-i386.js!"
-            exit 1
+            echo "Failed to download qemu-system-i386.js from original source!"
+            # Fallback to a local copy or alternative source if added to repo
+            cp ../qemu-system-i386.js qemujs-binaries/ 2>/dev/null || {
+              echo "No local qemu-system-i386.js found in repository!"
+              exit 1
+            }
           }
-          # Download the WebAssembly binary
+          # Attempt to download qemu-system-i386.wasm (noting it’s currently 404)
           wget -O qemujs-binaries/qemu-system-i386.wasm https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm || {
-            echo "Failed to download qemu-system-i386.wasm!"
-            exit 1
+            echo "Original qemu-system-i386.wasm not found (404), trying fallback..."
+            # Replace with your hosted URL or local copy
+            # Example: wget -O qemujs-binaries/qemu-system-i386.wasm https://github.com/<your-username>/<your-repo>/raw/main/qemu-system-i386.wasm
+            cp ../qemu-system-i386.wasm qemujs-binaries/ || {
+              echo "Failed to find qemu-system-i386.wasm! Please add it to the repository root or update the URL."
+              echo "See: https://github.com/atrosinenko/qemujs-demo/issues for updates or build it manually with qemujs-builder."
+              exit 1
+            }
           }
           ls -la qemujs-binaries
+          # Verify both files exist
+          if [ ! -f "qemujs-binaries/qemu-system-i386.js" ] || [ ! -f "qemujs-binaries/qemu-system-i386.wasm" ]; then
+            echo "Error: Missing one or both QEMU files!"
+            exit 1
+          fi
         working-directory: .
 
-      # Step 6: Test the Qemu.js binary (optional, may not fully work due to CLI limitations)
+      # Step 6: Test Qemu.js Binary
       - name: Test Qemu.js Binary
         run: |
           cd qemujs-binaries
@@ -66,22 +80,29 @@ jobs:
           fi
         working-directory: .
 
-      # Step 7: Upload the artifacts for use in your project
+      # Step 7: Upload Qemu.js Artifacts
       - name: Upload Qemu.js Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-js-prebuilt  # Name of the artifact bundle
-          path: qemujs-binaries/*  # Include all files in the qemujs-binaries directory
-          if-no-files-found: error  # Fail the step if no files are found
-          retention-days: 7  # Keep artifacts for 7 days
+          name: qemu-js-prebuilt
+          path: qemujs-binaries/*
+          if-no-files-found: error
+          retention-days: 7
 
-      # Step 8: Clean up temporary files
+      # Step 8: Cleanup
       - name: Cleanup
         run: |
           rm -rf emsdk qemujs-binaries
 
-      # Step 9: Notify the build status
+      # Step 9: Notify Build Status with Usage Notes
       - name: Notify Build Status
-        if: always()  # Run this step regardless of success or failure
+        if: always()
         run: |
           echo "Qemu.js build job completed with status: ${{ job.status }}"
+          echo "Next steps:"
+          echo "1. Download artifacts (qemu-system-i386.js and .wasm) and place them with index.html."
+          echo "2. Customize an Android-x86 ISO with ADB:"
+          echo "   - Extract ISO, unsquash system.sfs, add adbd to /system/bin/, enable USB debugging in build.prop, repack."
+          echo "   - See: https://android-x86.org for ISO downloads."
+          echo "3. Update index.html to forward ADB port: Add '-net user,hostfwd=tcp::5555-:5555' to Module.arguments."
+          echo "4. Run locally: python -m http.server 8000, then use 'adb connect localhost:5555' for shell access."
