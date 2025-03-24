@@ -19,7 +19,8 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build
+          sudo apt-get install -y build-essential python2.7 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build
+          sudo ln -sf /usr/bin/python2.7 /usr/bin/python  # Symlink python2.7 as python
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
@@ -102,12 +103,12 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "WARNING: This step is expected to fail due to missing GLib."
-          CONFIGURE_CMD="emconfigure ./configure --target-list=${{ matrix.target }} --enable-tcg-interpreter --disable-xen"
+          echo "Configuring QEMU with Python 2.7..."
+          CONFIGURE_CMD="emconfigure ./configure --python=/usr/bin/python2.7 --target-list=${{ matrix.target }} --enable-tcg-interpreter --disable-xen"
           if eval "$CONFIGURE_CMD"; then
             echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
           else
-            echo "Configure failed due to GLib dependency (expected)."
+            echo "Configure failed (check logs for details)."
             if [ -f build/meson-logs/meson-log.txt ]; then
               cat build/meson-logs/meson-log.txt
             fi
@@ -186,7 +187,8 @@ jobs:
       - name: Install Build Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git python3 ninja-build
+          sudo apt-get install -y build-essential python2.7 git ninja-build libsdl2-dev libglib2.0-dev libpixman-1-dev
+          sudo ln -sf /usr/bin/python2.7 /usr/bin/python  # Symlink python2.7 as python
 
       - name: Fetch and Build Qemu.js with qemujs-builder
         run: |
@@ -203,7 +205,7 @@ jobs:
           cd build-emscripten
           echo "Configuring QEMU for Emscripten..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emconfigure ../configure --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen || {
+          emconfigure ../configure --python=/usr/bin/python2.7 --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen || {
             echo "Error: Configuration failed!"
             exit 1
           }
