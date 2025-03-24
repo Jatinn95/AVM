@@ -40,7 +40,7 @@ jobs:
       - name: Fetch or Verify Qemu.js and WASM
         run: |
           mkdir -p qemujs-binaries
-          # Download qemu-system-i386.js or use local copy
+          # Download qemu-system-i386.js from original source (working as of 2025-03-24)
           wget -O qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
             echo "Failed to download qemu-system-i386.js from original source!"
             cp ../qemu-system-i386.js qemujs-binaries/ 2>/dev/null || {
@@ -48,17 +48,25 @@ jobs:
               exit 1
             }
           }
-          # Verify qemu-system-i386.wasm is in repo root (since it's downloaded)
+          echo "qemu-system-i386.js downloaded successfully."
+          # Verify qemu-system-i386.wasm is in repo root (user indicated it’s downloaded)
           echo "Checking for qemu-system-i386.wasm in repository root..."
           if [ -f "../qemu-system-i386.wasm" ]; then
             cp ../qemu-system-i386.wasm qemujs-binaries/
             echo "qemu-system-i386.wasm found and copied successfully."
           else
             echo "ERROR: qemu-system-i386.wasm not found in repository root!"
-            echo "Since you’ve indicated it’s downloaded, please add it to the repository root and commit."
-            echo "Options if missing:"
+            echo "You’ve indicated that 'qemu-system-i386' is downloaded, but qemu-system-i386.wasm is missing."
+            echo "Please add it to the repository root and commit with:"
+            echo "  git add qemu-system-i386.wasm"
+            echo "  git commit -m 'Add qemu-system-i386.wasm'"
+            echo "  git push"
+            echo "Options to obtain it:"
             echo "1. Build it with qemujs-builder: https://github.com/atrosinenko/qemujs-builder"
-            echo "2. Check https://github.com/atrosinenko/qemujs-demo/issues for updates."
+            echo "   - git clone https://github.com/atrosinenko/qemujs-builder.git"
+            echo "   - cd qemujs-builder; git submodule update --init qemu"
+            echo "   - cd qemu; emconfigure ./configure --target-list=i386-softmmu --enable-sdl; emmake make"
+            echo "2. Check https://github.com/atrosinenko/qemujs-demo/issues for updates or alternative sources."
             exit 1
           fi
           ls -la qemujs-binaries
@@ -88,7 +96,7 @@ jobs:
         with:
           name: qemu-js-prebuilt
           path: qemujs-binaries/*
-          if-no-files-found: error  # Fail if files are missing now that both are expected
+          if-no-files-found: error  # Fail if files are missing
           retention-days: 7
 
       # Step 8: Cleanup
