@@ -194,7 +194,7 @@ jobs:
         run: |
           echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
 
-  # Fetch and use pre-built Qemu.js (confirmed working)
+  # Fetch and use pre-built Qemu.js (with minimal build step)
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -207,11 +207,29 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Fetch Qemu.js Pre-built Binaries
+      - name: Install Emscripten
         run: |
-          echo "Fetching pre-built Qemu.js binaries..."
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
+          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
+          source ./emsdk_env.sh
+          echo "Emscripten version: $(emcc --version)"
+        working-directory: .
+        timeout-minutes: 10
+
+      - name: Fetch and Build Qemu.js Pre-built Binaries
+        run: |
+          echo "Fetching Qemu.js repository..."
           git clone https://github.com/atrosinenko/qemujs.git
           cd qemujs
+          echo "Installing build dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y make
+          echo "Building Qemu.js binaries..."
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          make  # Use the repo's Makefile to build
           echo "Listing available binaries..."
           ls -la
           echo "Qemu.js version information (if available):"
@@ -246,6 +264,7 @@ jobs:
         run: |
           echo "Cleaning up Qemu.js files..."
           rm -rf qemujs
+          rm -rf emsdk
           echo "Cleanup completed."
 
       - name: Notify Build Status
