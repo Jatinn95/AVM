@@ -1,101 +1,84 @@
 name: Build QEMU WebAssembly (Advanced)
 on: [push]
 jobs:
-  # Attempt to build QEMU from source with WASM output
   build-from-source:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    continue-on-error: true  # Allow this job to fail without failing the workflow
+    continue-on-error: true
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
       QEMU_VERSION: "9.2.0"
-      EMSDK_VERSION: "latest"
+      EMSDK_VERSION: "3.1.55"  # Pin to a specific version for stability
       ARTIFACT_RETENTION_DAYS: 7
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Update to latest version
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libsdl2-dev libpixman-1-dev ninja-build
+          sudo apt-get install -y build-essential python3 libsdl2-dev libpixman-1-dev ninja-build git
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
-        uses: actions/cache@v3
+        uses: actions/cache@v4  # Update to latest version
         with:
-          path: emsdk
+          path: ~/emsdk
           key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v2
           restore-keys: |
             emsdk-${{ runner.os }}-
 
-      - name: Install Emscripten
+      - name: Install and Activate Emscripten
         run: |
-          if [ ! -d "emsdk" ]; then
+          mkdir -p ~/emsdk
+          cd ~/emsdk
+          if [ ! -d ".git" ]; then
             echo "Cloning Emscripten SDK..."
-            git clone https://github.com/emscripten-core/emsdk.git
-          fi
-          cd emsdk
-          if [ ! -d "upstream/emscripten" ]; then
-            echo "Installing Emscripten ${{ env.EMSDK_VERSION }}..."
-            ./emsdk install ${{ env.EMSDK_VERSION }} || {
-              echo "Failed to install Emscripten, retrying once..."
-              ./emsdk install ${{ env.EMSDK_VERSION }}
-            }
+            git clone https://github.com/emscripten-core/emsdk.git .
           else
-            echo "Emscripten directory exists, updating via git..."
-            git pull || echo "Git pull failed, proceeding with existing version..."
+            echo "Updating Emscripten SDK..."
+            git pull
           fi
-          echo "Activating Emscripten ${{ env.EMSDK_VERSION }}..."
+          ./emsdk install ${{ env.EMSDK_VERSION }}
           ./emsdk activate ${{ env.EMSDK_VERSION }}
-          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
+          echo "EMSDK_PATH=$HOME/emsdk" >> $GITHUB_ENV
           echo "Emscripten version: $(emcc --version)"
-        working-directory: .
         timeout-minutes: 15
 
       - name: Cache QEMU Source
         id: cache-qemu
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: qemu-${{ env.QEMU_VERSION }}
-          key: qemu-${{ env.QEMU_VERSION }}-${{ runner.os }}
+          key: qemu-${{ env.QEMU_VERSION }}-${{ runner.os }}-v1
           restore-keys: |
             qemu-${{ env.QEMU_VERSION }}-${{ runner.os }}
 
       - name: Download QEMU Source
         if: steps.cache-qemu.outputs.cache-hit != 'true'
         run: |
-          echo "Attempting to download QEMU ${{ env.QEMU_VERSION }}..."
           wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz || {
-            echo "Error: Failed to download qemu-${{ env.QEMU_VERSION }}.tar.xz."
-            echo "Check version availability at https://download.qemu.org/."
+            echo "Failed to download QEMU source. Exiting."
             exit 1
           }
           tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
-          echo "QEMU source downloaded and extracted successfully."
         timeout-minutes: 10
 
       - name: Patch QEMU Configure Script
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "Patching configure script to bypass host OS and GLib checks..."
-          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          sed -i '/Unrecognized host OS/ s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux"\nhost_os=linux|' configure
           sed -i 's|error_exit "sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T.|echo "Skipping GLib size check for WebAssembly"|' configure
-          echo "Verifying GLib patch..."
           grep -A 5 "sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T" configure
-        working-directory: .
 
       - name: Patch QEMU Meson Build File
         run: |
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "Patching meson.build to bypass compiler version check..."
-          sed -i "s|error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|message('Allowing Emscripten: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')|" meson.build
-          echo "Verifying patch around line 328:"
+          sed -i "s|error('You either need GCC v7.4|message('Bypassing compiler check for Emscripten')|" meson.build
           sed -n '320,340p' meson.build
-        working-directory: .
 
       - name: Create Meson Cross-File
         run: |
@@ -117,51 +100,57 @@ jobs:
           cpu = 'wasm32'
           endian = 'little'
           EOF
-          echo "Created Meson cross-file at $(pwd)/emscripten-cross.txt:"
           cat emscripten-cross.txt
-        working-directory: .
 
-      - name: Configure QEMU
+      - name: Configure QEMU for WebAssembly
         id: configure
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
-          echo "Configuring QEMU for WebAssembly with target: ${{ matrix.target }}..."
-          export PKG_CONFIG_LIBDIR=""
-          CONFIGURE_CMD="emconfigure ./configure --target-list=${{ matrix.target }} --enable-tcg-interpreter --disable-xen"
-          echo "Running configure: $CONFIGURE_CMD"
-          if eval "$CONFIGURE_CMD"; then
-            echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
-            echo "QEMU configured for target: ${{ matrix.target }}"
-          else
-            echo "Configure failed; check logs above for details."
+          emconfigure ./configure \
+            --cross-prefix="" \
+            --target-list=${{ matrix.target }} \
+            --enable-tcg-interpreter \
+            --disable-xen \
+            --disable-user \
+            --disable-tools \
+            --disable-docs \
+            --disable-guest-agent \
+            --enable-system || {
+            echo "Configure failed."
             echo "CONFIGURE_SUCCEEDED=false" >> $GITHUB_ENV
-          fi
-        working-directory: .
+            exit 1
+          }
+          echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
+        timeout-minutes: 10
 
       - name: Build QEMU with WASM Output
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
-          emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s EXPORT_NAME='QEMU_${{ matrix.target }}' -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1"
-          echo "QEMU build completed for target: ${{ matrix.target }}"
+          emmake make -j2 V=1 \
+            CFLAGS="-O2 -s USE_SDL=2 -s ASSERTIONS=1" \
+            LDFLAGS="-s WASM=1 -s EXPORT_NAME='QEMU_${{ matrix.target }}' -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s ENVIRONMENT=web" || {
+            echo "Build failed. Listing directory contents:"
+            ls -la ${{ matrix.target }}/
+            exit 1
+          }
           ls -la ${{ matrix.target }}/
-        working-directory: .
-        timeout-minutes: 15
+        timeout-minutes: 20
 
       - name: Test QEMU Binary
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
-          ls -la
-          if [ -f "qemu-system-${{ matrix.target }}.js" ]; then
-            node qemu-system-${{ matrix.target }}.js --version || echo "Test may fail as QEMU might not support --version directly."
+          if [ -f "qemu-system-${{ matrix.target }}.wasm" ]; then
+            echo "WASM file found: qemu-system-${{ matrix.target }}.wasm"
+            file qemu-system-${{ matrix.target }}.wasm
           else
-            echo "Error: qemu-system-${{ matrix.target }}.js not found, skipping test."
+            echo "Error: .wasm file not generated."
+            ls -la
           fi
-        working-directory: .
 
       - name: Upload Artifacts
         if: env.CONFIGURE_SUCCEEDED == 'true'
@@ -171,90 +160,83 @@ jobs:
           path: |
             qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.js
             qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
-          if-no-files-found: warn
+          if-no-files-found: error  # Fail if no files are found
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
         run: |
-          echo "Cleaning up build files..."
           rm -rf qemu-${{ env.QEMU_VERSION }}
-          rm -rf emsdk
-          echo "Cleanup completed."
+          rm -rf ~/emsdk
 
       - name: Notify Build Status
         if: always()
         run: |
-          echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
+          echo "Build status for ${{ matrix.target }}: ${{ job.status }}"
 
-  # Fetch and use pre-built Qemu.js with WASM output
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install Emscripten
         run: |
-          git clone https://github.com/emscripten-core/emsdk.git
-          cd emsdk
-          ./emsdk install latest
-          ./emsdk activate latest
-          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
+          mkdir -p ~/emsdk
+          cd ~/emsdk
+          git clone https://github.com/emscripten-core/emsdk.git .
+          ./emsdk install 3.1.55
+          ./emsdk activate 3.1.55
           source ./emsdk_env.sh
+          echo "EMSDK_PATH=$HOME/emsdk" >> $GITHUB_ENV
           echo "Emscripten version: $(emcc --version)"
-        working-directory: .
         timeout-minutes: 10
 
-      - name: Fetch and Build Qemu.js Pre-built Binaries
+      - name: Fetch and Build Qemu.js
         run: |
-          echo "Fetching Qemu.js repository..."
           git clone https://github.com/atrosinenko/qemujs.git
           cd qemujs
-          echo "Installing build dependencies..."
           sudo apt-get update
           sudo apt-get install -y make build-essential python3 libsdl2-dev libpixman-1-dev
-          echo "Patching configure script to bypass host OS and GLib checks..."
-          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          sed -i 's|error_exit "sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T.|echo "Skipping GLib size check for WebAssembly"|' configure
-          echo "Verifying GLib patch..."
-          grep -A 5 "sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T" configure
-          echo "Configuring Qemu.js for WebAssembly..."
+          sed -i '/Unrecognized host OS/ s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux"\nhost_os=linux|' configure
+          sed -i 's|error_exit "sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T.|echo "Skipping GLib size check"|' configure
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          export PKG_CONFIG_LIBDIR=""
-          emconfigure ./configure --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen --disable-guest-agent --disable-docs --disable-tools --enable-system --disable-user || {
-            echo "Configure failed; proceeding to check output..."
+          emconfigure ./configure \
+            --target-list=i386-softmmu \
+            --enable-tcg-interpreter \
+            --disable-xen \
+            --disable-guest-agent \
+            --disable-docs \
+            --disable-tools \
+            --enable-system \
+            --disable-user || {
+            echo "Configure failed."
+            exit 1
           }
-          echo "Building Qemu.js binaries with WASM output..."
-          emmake make -j2 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s EXPORT_NAME='QEMU' -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
-            echo "Make failed; checking for partial output..."
-          }
-          echo "Listing available binaries..."
-          ls -la i386-softmmu/
-          echo "Qemu.js version information (if available):"
-          if [ -f "i386-softmmu/qemu-system-i386.js" ] && [ -f "i386-softmmu/qemu-system-i386.wasm" ]; then
-            node i386-softmmu/qemu-system-i386.js --version || echo "Version check not supported directly."
-          else
-            echo "Expected binaries i386-softmmu/qemu-system-i386.js or .wasm not found, listing directory contents:"
+          emmake make -j2 \
+            CFLAGS="-O2 -s USE_SDL=2 -s ASSERTIONS=1" \
+            LDFLAGS="-s WASM=1 -s EXPORT_NAME='QEMU' -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s ENVIRONMENT=web" || {
+            echo "Build failed."
             ls -la i386-softmmu/
-          fi
-        working-directory: .
+            exit 1
+          }
+          ls -la i386-softmmu/
 
       - name: Test Qemu.js Binary
         run: |
-          cd qemujs
-          echo "Testing Qemu.js pre-built binary..."
-          if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
-            node i386-softmmu/qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
+          cd qemujs/i386-softmmu
+          if [ -f "qemu-system-i386.wasm" ]; then
+            echo "WASM file found: qemu-system-i386.wasm"
+            file qemu-system-i386.wasm
           else
-            echo "Error: i386-softmmu/qemu-system-i386.js not found, skipping test."
+            echo "Error: .wasm file not generated."
+            ls -la
           fi
-        working-directory: .
 
       - name: Upload Qemu.js Artifacts
         uses: actions/upload-artifact@v4
@@ -263,17 +245,15 @@ jobs:
           path: |
             qemujs/i386-softmmu/qemu-system-i386.js
             qemujs/i386-softmmu/qemu-system-i386.wasm
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
 
       - name: Cleanup
         run: |
-          echo "Cleaning up Qemu.js files..."
           rm -rf qemujs
-          rm -rf emsdk
-          echo "Cleanup completed."
+          rm -rf ~/emsdk
 
       - name: Notify Build Status
         if: always()
         run: |
-          echo "Pre-built Qemu.js job completed with status: ${{ job.status }}"
+          echo "Prebuilt Qemu.js status: ${{ job.status }}"
