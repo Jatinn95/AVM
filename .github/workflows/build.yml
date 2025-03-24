@@ -199,9 +199,11 @@ jobs:
             exit 1
           }
           cd qemu
+          mkdir build-emscripten
+          cd build-emscripten
           echo "Configuring QEMU for Emscripten..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emconfigure ./configure --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen || {
+          emconfigure ../configure --target-list=i386-softmmu --enable-tcg-interpreter --disable-xen || {
             echo "Error: Configuration failed!"
             exit 1
           }
@@ -210,16 +212,21 @@ jobs:
             echo "Error: Build failed!"
             exit 1
           }
+          echo "Checking for .wasm file..."
+          if [ ! -f "i386-softmmu/qemu-system-i386.wasm" ]; then
+            echo "Error: qemu-system-i386.wasm not found!"
+            exit 1
+          fi
           echo "Listing built files:"
           ls -lh i386-softmmu/qemu-system-i386*
           echo "Copying build outputs..."
-          mkdir -p ../../qemujs-binaries
-          cp i386-softmmu/qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: qemu-system-i386.js not found!"
-          cp i386-softmmu/qemu-system-i386.wasm ../../qemujs-binaries/ || echo "Warning: qemu-system-i386.wasm not found!"
-          cp *.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
-          cp shell.html ../../qemujs-binaries/ 2>/dev/null || echo "No shell.html found, creating a basic one..."
-          if [ ! -f ../../qemujs-binaries/shell.html ]; then
-            cat > ../../qemujs-binaries/shell.html << 'EOF'
+          ROOT_PATH=$(pwd)/../../../
+          mkdir -p $ROOT_PATH/qemujs-binaries
+          cp i386-softmmu/qemu-system-i386.js $ROOT_PATH/qemujs-binaries/ || echo "Warning: qemu-system-i386.js not found!"
+          cp i386-softmmu/qemu-system-i386.wasm $ROOT_PATH/qemujs-binaries/ || echo "Warning: qemu-system-i386.wasm not found!"
+          cp *.data $ROOT_PATH/qemujs-binaries/ 2>/dev/null || echo "No .data files found."
+          if [ ! -f $ROOT_PATH/qemujs-binaries/shell.html ]; then
+            cat > $ROOT_PATH/qemujs-binaries/shell.html << 'EOF'
             <!DOCTYPE html>
             <html>
             <head><title>QEMU.js</title></head>
