@@ -10,11 +10,11 @@ jobs:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
       QEMU_VERSION: "9.2.0"
-      EMSDK_VERSION: "3.1.55"  # Pin to a specific version for stability
+      EMSDK_VERSION: "3.1.55"
       ARTIFACT_RETENTION_DAYS: 7
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4  # Update to latest version
+        uses: actions/checkout@v4
 
       - name: Install Build Dependencies
         run: |
@@ -23,10 +23,10 @@ jobs:
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
-        uses: actions/cache@v4  # Update to latest version
+        uses: actions/cache@v4
         with:
           path: ~/emsdk
-          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v2
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v3
           restore-keys: |
             emsdk-${{ runner.os }}-
 
@@ -41,11 +41,16 @@ jobs:
             echo "Updating Emscripten SDK..."
             git pull
           fi
-          ./emsdk install ${{ env.EMSDK_VERSION }}
+          ./emsdk install ${{ env.EMSDK_VERSION }} || {
+            echo "Emscripten install failed. Retrying..."
+            ./emsdk install ${{ env.EMSDK_VERSION }}
+          }
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           source ./emsdk_env.sh
           echo "EMSDK_PATH=$HOME/emsdk" >> $GITHUB_ENV
           echo "Emscripten version: $(emcc --version)"
+          which emcc
+          emcc -v  # Verbose output for debugging
         timeout-minutes: 15
 
       - name: Cache QEMU Source
@@ -54,18 +59,15 @@ jobs:
         with:
           path: qemu-${{ env.QEMU_VERSION }}
           key: qemu-${{ env.QEMU_VERSION }}-${{ runner.os }}-v1
-          restore-keys: |
-            qemu-${{ env.QEMU_VERSION }}-${{ runner.os }}
 
       - name: Download QEMU Source
         if: steps.cache-qemu.outputs.cache-hit != 'true'
         run: |
           wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz || {
-            echo "Failed to download QEMU source. Exiting."
+            echo "Failed to download QEMU source."
             exit 1
           }
           tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
-        timeout-minutes: 10
 
       - name: Patch QEMU Configure Script
         run: |
@@ -107,6 +109,7 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
+          echo "Configuring QEMU for ${{ matrix.target }}..."
           emconfigure ./configure \
             --cross-prefix="" \
             --target-list=${{ matrix.target }} \
@@ -116,8 +119,11 @@ jobs:
             --disable-tools \
             --disable-docs \
             --disable-guest-agent \
-            --enable-system || {
-            echo "Configure failed."
+            --enable-system \
+            --extra-cflags="-v" \
+            --extra-ldflags="-v" || {
+            echo "Configure failed. Dumping config.log:"
+            cat config.log
             echo "CONFIGURE_SUCCEEDED=false" >> $GITHUB_ENV
             exit 1
           }
@@ -129,13 +135,15 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
+          echo "Building QEMU for ${{ matrix.target }}..."
           emmake make -j2 V=1 \
-            CFLAGS="-O2 -s USE_SDL=2 -s ASSERTIONS=1" \
-            LDFLAGS="-s WASM=1 -s EXPORT_NAME='QEMU_${{ matrix.target }}' -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s ENVIRONMENT=web" || {
+            CFLAGS="-O2 -s USE_SDL=2 -s ASSERTIONS=1 -v" \
+            LDFLAGS="-s WASM=1 -s EXPORT_NAME='QEMU_${{ matrix.target }}' -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s ENVIRONMENT=web -v" || {
             echo "Build failed. Listing directory contents:"
             ls -la ${{ matrix.target }}/
             exit 1
           }
+          echo "Build completed. Checking output:"
           ls -la ${{ matrix.target }}/
         timeout-minutes: 20
 
@@ -145,11 +153,12 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
           if [ -f "qemu-system-${{ matrix.target }}.wasm" ]; then
-            echo "WASM file found: qemu-system-${{ matrix.target }}.wasm"
+            echo "WASM file found:"
             file qemu-system-${{ matrix.target }}.wasm
           else
             echo "Error: .wasm file not generated."
             ls -la
+            exit 1
           fi
 
       - name: Upload Artifacts
@@ -160,7 +169,7 @@ jobs:
           path: |
             qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.js
             qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
-          if-no-files-found: error  # Fail if no files are found
+          if-no-files-found: error
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
@@ -195,7 +204,7 @@ jobs:
           source ./emsdk_env.sh
           echo "EMSDK_PATH=$HOME/emsdk" >> $GITHUB_ENV
           echo "Emscripten version: $(emcc --version)"
-        timeout-minutes: 10
+          emcc -v
 
       - name: Fetch and Build Qemu.js
         run: |
@@ -214,14 +223,17 @@ jobs:
             --disable-docs \
             --disable-tools \
             --enable-system \
-            --disable-user || {
-            echo "Configure failed."
+            --disable-user \
+            --extra-cflags="-v" \
+            --extra-ldflags="-v" || {
+            echo "Configure failed. Dumping config.log:"
+            cat config.log
             exit 1
           }
           emmake make -j2 \
-            CFLAGS="-O2 -s USE_SDL=2 -s ASSERTIONS=1" \
-            LDFLAGS="-s WASM=1 -s EXPORT_NAME='QEMU' -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s ENVIRONMENT=web" || {
-            echo "Build failed."
+            CFLAGS="-O2 -s USE_SDL=2 -s ASSERTIONS=1 -v" \
+            LDFLAGS="-s WASM=1 -s EXPORT_NAME='QEMU' -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s ENVIRONMENT=web -v" || {
+            echo "Build failed. Listing directory contents:"
             ls -la i386-softmmu/
             exit 1
           }
@@ -231,11 +243,12 @@ jobs:
         run: |
           cd qemujs/i386-softmmu
           if [ -f "qemu-system-i386.wasm" ]; then
-            echo "WASM file found: qemu-system-i386.wasm"
+            echo "WASM file found:"
             file qemu-system-i386.wasm
           else
             echo "Error: .wasm file not generated."
             ls -la
+            exit 1
           fi
 
       - name: Upload Qemu.js Artifacts
