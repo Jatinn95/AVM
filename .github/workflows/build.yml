@@ -36,11 +36,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git python3 ninja-build
 
-      # Step 5: Fetch Pre-built Qemu.js and WASM with conditional local fallback
-      - name: Fetch Pre-built Qemu.js and WASM
+      # Step 5: Fetch or Verify Qemu.js and WASM
+      - name: Fetch or Verify Qemu.js and WASM
         run: |
           mkdir -p qemujs-binaries
-          # Download qemu-system-i386.js from original source
+          # Download qemu-system-i386.js or use local copy
           wget -O qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
             echo "Failed to download qemu-system-i386.js from original source!"
             cp ../qemu-system-i386.js qemujs-binaries/ 2>/dev/null || {
@@ -48,25 +48,26 @@ jobs:
               exit 1
             }
           }
-          # Skip original wasm download (404) and check for local copy
-          echo "Note: Skipping https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm (404 Not Found)"
+          # Verify qemu-system-i386.wasm is in repo root (since it's downloaded)
+          echo "Checking for qemu-system-i386.wasm in repository root..."
           if [ -f "../qemu-system-i386.wasm" ]; then
             cp ../qemu-system-i386.wasm qemujs-binaries/
-            echo "Found qemu-system-i386.wasm in repository root."
+            echo "qemu-system-i386.wasm found and copied successfully."
           else
-            echo "WARNING: qemu-system-i386.wasm not found in repository root!"
-            echo "Continuing without .wasm for testing, but QEMU will not run until added."
-            echo "You must add qemu-system-i386.wasm to the repository root to fully function."
-            echo "Options:"
-            echo "1. Download from a working source and commit it."
-            echo "2. Build it with qemujs-builder: https://github.com/atrosinenko/qemujs-builder"
-            echo "3. Check https://github.com/atrosinenko/qemujs-demo/issues for updates."
+            echo "ERROR: qemu-system-i386.wasm not found in repository root!"
+            echo "Since you’ve indicated it’s downloaded, please add it to the repository root and commit."
+            echo "Options if missing:"
+            echo "1. Build it with qemujs-builder: https://github.com/atrosinenko/qemujs-builder"
+            echo "2. Check https://github.com/atrosinenko/qemujs-demo/issues for updates."
+            exit 1
           fi
           ls -la qemujs-binaries
-          # Warn if both files aren't present, but don't fail yet
+          # Ensure both files are present
           if [ ! -f "qemujs-binaries/qemu-system-i386.js" ] || [ ! -f "qemujs-binaries/qemu-system-i386.wasm" ]; then
-            echo "Warning: Missing one or both QEMU files! Workflow will complete, but QEMU won’t work without .wasm."
+            echo "Error: Missing one or both QEMU files!"
+            exit 1
           fi
+          echo "Both qemu-system-i386.js and qemu-system-i386.wasm are ready."
         working-directory: .
 
       # Step 6: Test Qemu.js Binary
@@ -87,7 +88,7 @@ jobs:
         with:
           name: qemu-js-prebuilt
           path: qemujs-binaries/*
-          if-no-files-found: warn  # Allow partial success for testing
+          if-no-files-found: error  # Fail if files are missing now that both are expected
           retention-days: 7
 
       # Step 8: Cleanup
@@ -101,10 +102,9 @@ jobs:
         run: |
           echo "Qemu.js build job completed with status: ${{ job.status }}"
           echo "Next steps:"
-          echo "1. Add qemu-system-i386.wasm to the repository root and rerun this workflow."
-          echo "2. Download artifacts (qemu-system-i386.js and .wasm, if present) and place with index.html."
-          echo "3. Customize an Android-x86 ISO with ADB:"
+          echo "1. Download artifacts (qemu-system-i386.js and .wasm) and place with index.html."
+          echo "2. Customize an Android-x86 ISO with ADB:"
           echo "   - Extract ISO, unsquash system.sfs, add adbd to /system/bin/, enable USB debugging in build.prop, repack."
           echo "   - See: https://android-x86.org for ISO downloads."
-          echo "4. Update index.html to forward ADB port: Add '-net user,hostfwd=tcp::5555-:5555' to Module.arguments."
-          echo "5. Run locally: python -m http.server 8000, then use 'adb connect localhost:5555' for shell access."
+          echo "3. Update index.html to forward ADB port: Add '-net user,hostfwd=tcp::5555-:5555' to Module.arguments."
+          echo "4. Run locally: python -m http.server 8000, then use 'adb connect localhost:5555' for shell access."
