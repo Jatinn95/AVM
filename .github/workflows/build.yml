@@ -104,7 +104,7 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
           echo "WARNING: This step is expected to fail due to missing GLib."
-          CONFIGURE_CMD="emconfigure ./configure --target-list=${{ matrix.target }} --enable-tcg-interpreter --disable-xen --cross-prefix=''"
+          CONFIGURE_CMD="emconfigure ./configure --target-list=${{ matrix.target }} --enable-tcg-interpreter --disable-xen"
           if eval "$CONFIGURE_CMD"; then
             echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
           else
@@ -116,41 +116,22 @@ jobs:
           fi
         working-directory: .
 
-      - name: Build QEMU with Explicit WebAssembly Output
+      - name: Build QEMU
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}
-          emmake make -j2 V=1 \
-            CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
-            LDFLAGS="-s USE_SDL=2 -s WASM=1 -s SIDE_MODULE=0 -s MODULARIZE=1 -s EXPORT_NAME='QEMUModule' -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" \
-            EMCC_CFLAGS="-s WASM=1 -s EXPORT_NAME='QEMUModule'"
-          echo "Listing generated files:"
-          ls -la ${{ matrix.target }}/qemu-system-${{ matrix.target }}*
+          emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1"
         working-directory: .
         timeout-minutes: 15
-
-      - name: Verify WebAssembly Output
-        if: env.CONFIGURE_SUCCEEDED == 'true'
-        run: |
-          cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
-          if [ -f "qemu-system-${{ matrix.target }}.wasm" ]; then
-            echo "WebAssembly file found: qemu-system-${{ matrix.target }}.wasm"
-            ls -la qemu-system-${{ matrix.target }}.wasm
-          else
-            echo "Error: .wasm file not generated!"
-            ls -la
-            exit 1
-          fi
-        working-directory: .
 
       - name: Test QEMU Binary
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}
-          if [ ! -f "qemu-system-${{ matrix.target }}.wasm" ]; then
-            echo "Error: QEMU WebAssembly binary not found!"
+          if [ ! -f "qemu-system-${{ matrix.target }}" ]; then
+            echo "Error: QEMU binary not found!"
             exit 1
           fi
           node qemu-system-${{ matrix.target }} --version || echo "Test failed, but continuing..."
@@ -161,9 +142,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-${{ matrix.target }}
-          path: |
-            qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.*
-            qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
+          path: qemu-${{ env.QEMU_VERSION }}/${{ matrix.target }}/qemu-system-${{ matrix.target }}.*
           if-no-files-found: error
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
@@ -177,7 +156,6 @@ jobs:
         run: |
           echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
 
-  # Build Qemu.js and .wasm using qemujs-builder with corrected execution context
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -207,7 +185,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git python3 ninja-build
 
-      - name: Fetch and Build Qemu.js and .wasm with qemujs-builder
+      - name: Fetch and Build Qemu.js with qemujs-builder
         run: |
           echo "Fetching qemujs-builder..."
           git clone https://github.com/atrosinenko/qemujs-builder.git
@@ -217,11 +195,7 @@ jobs:
             echo "Submodule update failed, falling back to pre-built binaries..."
             mkdir -p ../qemujs-binaries
             wget -O ../qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-              echo "Failed to download pre-built JS binary!"
-              exit 1
-            }
-            wget -O ../qemujs-binaries/qemu-system-i386.wasm https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm || {
-              echo "Failed to download pre-built WASM binary!"
+              echo "Failed to download pre-built binary!"
               exit 1
             }
             wget -O ../qemujs-binaries/shell.html https://atrosinenko.github.io/qemujs-demo/shell.html 2>/dev/null || echo "No shell.html downloaded."
@@ -241,31 +215,20 @@ jobs:
                 echo "Configuration failed! Falling back to pre-built binaries..."
                 mkdir -p ../../qemujs-binaries
                 wget -O ../../qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-                  echo "Failed to download pre-built JS binary!"
-                  exit 1
-                }
-                wget -O ../../qemujs-binaries/qemu-system-i386.wasm https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm || {
-                  echo "Failed to download pre-built WASM binary!"
+                  echo "Failed to download pre-built binary!"
                   exit 1
                 }
                 wget -O ../../qemujs-binaries/shell.html https://atrosinenko.github.io/qemujs-demo/shell.html 2>/dev/null || echo "No shell.html downloaded."
                 echo "BUILD_SKIPPED=true" >> $GITHUB_ENV
                 exit 0
               }
-              echo "Building with make (including explicit .wasm output)..."
+              echo "Building with make..."
               cd build
-              emmake make -j2 \
-                CFLAGS="-s WASM=1 -s MODULARIZE=1 -s EXPORT_NAME='QEMUModule'" \
-                LDFLAGS="-s WASM=1 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" \
-                EMCC_CFLAGS="-s WASM=1 -s EXPORT_NAME='QEMUModule'" || {
+              emmake make -j2 || {
                 echo "Make failed! Falling back to pre-built binaries..."
                 mkdir -p ../../../qemujs-binaries
                 wget -O ../../../qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-                  echo "Failed to download pre-built JS binary!"
-                  exit 1
-                }
-                wget -O ../../../qemujs-binaries/qemu-system-i386.wasm https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm || {
-                  echo "Failed to download pre-built WASM binary!"
+                  echo "Failed to download pre-built binary!"
                   exit 1
                 }
                 wget -O ../../../qemujs-binaries/shell.html https://atrosinenko.github.io/qemujs-demo/shell.html 2>/dev/null || echo "No shell.html downloaded."
@@ -273,15 +236,11 @@ jobs:
                 exit 0
               }
               echo "Build completed, checking for binaries..."
-              ls -la ../qemu-system-*.js ../qemu-system-*.wasm || {
-                echo "No qemu-system-*.js or .wasm files found! Using fallback..."
+              ls -la ../qemu-system-*.js || {
+                echo "No qemu-system-*.js files found! Using fallback..."
                 mkdir -p ../../../qemujs-binaries
                 wget -O ../../../qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-                  echo "Failed to download pre-built JS binary!"
-                  exit 1
-                }
-                wget -O ../../../qemujs-binaries/qemu-system-i386.wasm https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.wasm || {
-                  echo "Failed to download pre-built WASM binary!"
+                  echo "Failed to download pre-built binary!"
                   exit 1
                 }
                 wget -O ../../../qemujs-binaries/shell.html https://atrosinenko.github.io/qemujs-demo/shell.html 2>/dev/null || echo "No shell.html downloaded."
@@ -290,7 +249,6 @@ jobs:
               }
               mkdir -p ../../qemujs-binaries
               cp ../qemu-system-*.js ../../qemujs-binaries/
-              cp ../qemu-system-*.wasm ../../qemujs-binaries/
               cp ../*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
               cp ../shell.html ../../qemujs-binaries/ 2>/dev/null || echo "No shell.html found."
             else
@@ -300,34 +258,21 @@ jobs:
           fi
         working-directory: .
 
-      - name: Verify WebAssembly Output
-        run: |
-          cd qemujs-binaries
-          if [ -f "qemu-system-i386.wasm" ]; then
-            echo "WebAssembly file found: qemu-system-i386.wasm"
-            ls -la qemu-system-i386.wasm
-          else
-            echo "Error: .wasm file not generated or not copied!"
-            ls -la
-            exit 1
-          fi
-        working-directory: .
-
-      - name: Test Qemu.js and .wasm Binary
+      - name: Test Qemu.js Binary
         run: |
           cd qemujs-binaries
           echo "Testing Qemu.js binary..."
-          if [ -f "qemu-system-i386.js" ] && [ -f "qemu-system-i386.wasm" ]; then
+          if [ -f "qemu-system-i386.js" ]; then
             node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
           else
-            echo "Error: qemu-system-i386.js or .wasm not found, skipping test."
+            echo "Error: qemu-system-i386.js not found, skipping test."
           fi
         working-directory: .
 
-      - name: Upload Qemu.js and .wasm Artifacts
+      - name: Upload Qemu.js Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-js-wasm-prebuilt
+          name: qemu-js-prebuilt
           path: qemujs-binaries/*
           if-no-files-found: error
           retention-days: 7
@@ -339,4 +284,4 @@ jobs:
       - name: Notify Build Status
         if: always()
         run: |
-          echo "Pre-built Qemu.js and .wasm job completed with status: ${{ job.status }}"
+          echo "Pre-built Qemu.js job completed with status: ${{ job.status }}"
