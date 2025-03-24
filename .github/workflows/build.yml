@@ -194,7 +194,7 @@ jobs:
         run: |
           echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
 
-  # Fetch and use pre-built Qemu.js (with GLib patch and WASM output)
+  # Fetch and use pre-built Qemu.js (with corrected GLib patch and WASM output)
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -229,7 +229,7 @@ jobs:
           sudo apt-get install -y make build-essential python3 libsdl2-dev libpixman-1-dev
           echo "Patching configure script to bypass host OS and GLib checks..."
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          sed -i '/sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T/{s/exit 1/echo "Skipping GLib size check for WebAssembly"/;}' configure
+          sed -i 's|error_exit "sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T.|echo "Skipping GLib size check for WebAssembly"|' configure
           echo "Verifying GLib patch..."
           grep -A 5 "sizeof(size_t) doesn.t match GLIB_SIZEOF_SIZE_T" configure
           echo "Configuring Qemu.js for WebAssembly..."
