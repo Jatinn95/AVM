@@ -9,13 +9,17 @@ jobs:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
       EMSDK_VERSION: "3.1.20"
-      ARTIFACT_RETENTION_DAYS: 7  # Fixed spacing issue, though YAML allows it
+      ARTIFACT_RETENTION_DAYS: 7  # Consistent naming, though space was valid in YAML
       PYTHON_VERSION: "2.7.18"
+
     steps:
+      # Annotation: Split 'Checkout Repository' into two steps to avoid 'uses' and 'run' conflict
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Log Checkout Timing
         run: |
           echo "Checkout started at $(date)"
           echo "Checkout completed at $(date)"
@@ -42,6 +46,7 @@ jobs:
           python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
           echo "Python 2.7 installed at $(date)"
 
+      # Annotation: Split 'Cache Emscripten SDK' to separate caching from logging
       - name: Cache Emscripten SDK
         id: cache-emsdk
         uses: actions/cache@v4
@@ -50,6 +55,8 @@ jobs:
           key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v3
           restore-keys: |
             emsdk-${{ runner.os }}-
+
+      - name: Log Emscripten Cache Timing
         run: |
           echo "Caching Emscripten started at $(date)"
           echo "Caching Emscripten completed at $(date)"
@@ -145,6 +152,7 @@ jobs:
           ls -lh "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm"
           echo "QEMU build completed for ${{ env.ARCH }} at $(date)"
 
+      # Annotation: 'Upload .wasm Artifact' retains 'uses' and removes redundant 'run'
       - name: Upload .wasm Artifact
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
