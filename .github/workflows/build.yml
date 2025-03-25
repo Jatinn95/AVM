@@ -76,6 +76,12 @@ jobs:
 
       - name: Configure QEMU
         id: configure
+        env:
+          CC: "emcc"
+          CXX: "em++"
+          LD: "emcc"
+          CFLAGS: "-s USE_PTHREADS=0 -DNO_FUTEX=1"
+          LDFLAGS: "-s USE_PTHREADS=0"
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
@@ -91,11 +97,11 @@ jobs:
             --disable-tools \
             --disable-vnc \
             --disable-gtk \
-            --extra-cflags="-s USE_PTHREADS=0 -DNO_FUTEX=1" \
-            --extra-ldflags="-s USE_PTHREADS=0" \
-            --cc="emcc" \
-            --cxx="em++" \
-            --host-cc="emcc" || {
+            --cc="$CC" \
+            --cxx="$CXX" \
+            --ld="$LD" \
+            --extra-cflags="$CFLAGS" \
+            --extra-ldflags="$LDFLAGS" || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
             exit 1
