@@ -3,7 +3,7 @@ on: [push]
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # Increased to 60 minutes
+    timeout-minutes: 60
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
@@ -22,7 +22,7 @@ jobs:
             wget libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev xz-utils tk-dev
 
       - name: Install Python 2.7 from Source
-        timeout-minutes: 20  # Specific timeout for Python build
+        timeout-minutes: 20
         run: |
           wget https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
           tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
@@ -84,11 +84,11 @@ jobs:
             --python=/usr/bin/python2.7 \
             --target-list=${{ matrix.target }} \
             --disable-xen \
-            --disable-threads \
             --disable-pie \
             --extra-cflags="-s USE_PTHREADS=0" \
             --extra-ldflags="-s USE_PTHREADS=0" || {
-            echo "Configure failed!"
+            echo "Configure failed! Dumping config.log for debugging:"
+            cat config.log
             exit 1
           }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
