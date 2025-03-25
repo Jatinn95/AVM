@@ -3,7 +3,7 @@ on: [push]
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90  # Increased to 90 minutes for the whole job
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
@@ -22,7 +22,7 @@ jobs:
             wget libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev xz-utils tk-dev
 
       - name: Install Python 2.7 from Source
-        timeout-minutes: 20
+        timeout-minutes: 25  # Increased slightly to 25 minutes
         run: |
           wget https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
           tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
@@ -32,6 +32,7 @@ jobs:
           sudo make altinstall
           sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
           python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
+          echo "Python installation completed at $(date)"
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
@@ -43,6 +44,7 @@ jobs:
             emsdk-${{ runner.os }}-
 
       - name: Install Emscripten
+        timeout-minutes: 20  # Increased to 20 minutes
         run: |
           if [ ! -d "emsdk" ]; then
             git clone https://github.com/emscripten-core/emsdk.git
@@ -53,8 +55,7 @@ jobs:
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           echo "Emscripten version: $(emcc --version)"
-        working-directory: .
-        timeout-minutes: 15
+          echo "Emscripten installation completed at $(date)"
 
       - name: Test Emscripten Environment
         run: |
@@ -62,6 +63,7 @@ jobs:
           emcc --version || { echo "Emscripten not working!"; exit 1; }
           which emconfigure || { echo "emconfigure not found!"; exit 1; }
           emcc -s USE_PTHREADS=0 -o test.o -c -x c - <<< "int main() { return 0; }" || { echo "Pthreads disabled compilation failed!"; exit 1; }
+          echo "Emscripten environment test completed at $(date)"
 
       - name: Fetch QEMU Source from qemujs-builder
         run: |
@@ -73,6 +75,7 @@ jobs:
           }
           cd qemu
           git checkout 62e5ad0178b6cee9a81cf16e939675855e85a68b
+          echo "QEMU source fetched at $(date)"
 
       - name: Configure QEMU
         id: configure
@@ -85,7 +88,7 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          echo "Configuring QEMU for ${{ matrix.target }}..."
+          echo "Configuring QEMU for ${{ matrix.target }} at $(date)..."
           emconfigure ./configure \
             --python=/usr/bin/python2.7 \
             --target-list=${{ matrix.target }} \
@@ -107,13 +110,14 @@ jobs:
             exit 1
           }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
+          echo "QEMU configuration completed at $(date)"
 
       - name: Build QEMU WebAssembly
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          echo "Building QEMU .wasm for ${{ matrix.target }}..."
+          echo "Building QEMU .wasm for ${{ matrix.target }} at $(date)..."
           emmake make -j2 V=1 \
             CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -DNO_FUTEX=1" \
             LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -s USE_PTHREADS=0"
@@ -123,7 +127,8 @@ jobs:
           fi
           echo "Built .wasm file:"
           ls -lh ${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
-        timeout-minutes: 15
+          echo "QEMU build completed at $(date)"
+        timeout-minutes: 20  # Increased to 20 minutes
 
       - name: Upload .wasm Artifact
         if: env.CONFIGURE_SUCCEEDED == 'true'
@@ -141,4 +146,4 @@ jobs:
       - name: Notify Build Status
         if: always()
         run: |
-          echo "Build-wasm completed for ${{ matrix.target }} with status: ${{ job.status }}"
+          echo "Build-wasm completed for ${{ matrix.target }} with status: ${{ job.status }} at $(date)"
