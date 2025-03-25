@@ -10,6 +10,7 @@ jobs:
     env:
       EMSDK_VERSION: "latest"
       ARTIFACT_RETENTION_DAYS: 7
+      PYTHON_VERSION: "2.7.18"  # Last Python 2.7 release
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -17,9 +18,19 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python2.7 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev
-          sudo ln -sf /usr/bin/python2.7 /usr/bin/python
-          python --version
+          sudo apt-get install -y build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
+            wget libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev xz-utils tk-dev
+
+      - name: Install Python 2.7 from Source
+        run: |
+          wget https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
+          tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
+          cd Python-${{ env.PYTHON_VERSION }}
+          ./configure --enable-optimizations
+          make -j$(nproc)
+          sudo make altinstall  # Install as python2.7, not overwriting system python
+          sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
+          python2.7 --version
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
@@ -99,7 +110,7 @@ jobs:
 
       - name: Cleanup
         run: |
-          rm -rf qemujs-builder emsdk
+          rm -rf qemujs-builder emsdk Python-${{ env.PYTHON_VERSION }} Python-${{ env.PYTHON_VERSION }}.tgz
 
       - name: Notify Build Status
         if: always()
