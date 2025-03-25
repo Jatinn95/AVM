@@ -1,7 +1,7 @@
-name: Build QEMU WebAssembly (Advanced)
+name: Build QEMU WebAssembly (.wasm only)
 on: [push]
 jobs:
-  build-from-source:
+  build-wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -46,11 +46,9 @@ jobs:
 
       - name: Test Emscripten Environment
         run: |
-          set -x
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           emcc --version || { echo "Emscripten not working!"; exit 1; }
-          which emconfigure
-          emconfigure --version || { echo "emconfigure not found or broken!"; exit 1; }
+          which emconfigure || { echo "emconfigure not found!"; exit 1; }
 
       - name: Fetch QEMU Source from qemujs-builder
         run: |
@@ -66,65 +64,36 @@ jobs:
       - name: Configure QEMU
         id: configure
         run: |
-          set -x
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          echo "Configuring QEMU with Python 2.7 for ${{ matrix.target }}..."
-          CONFIGURE_CMD="emconfigure ./configure --python=/usr/bin/python2.7 --target-list=${{ matrix.target }} --disable-xen"
-          echo "Running: $CONFIGURE_CMD"
-          if eval "$CONFIGURE_CMD"; then
-            echo "Configure succeeded."
-            echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
-          else
-            echo "Configure failed. Check logs above for details."
+          echo "Configuring QEMU for ${{ matrix.target }}..."
+          emconfigure ./configure --python=/usr/bin/python2.7 --target-list=${{ matrix.target }} --disable-xen || {
+            echo "Configure failed!"
             exit 1
-          fi
-        working-directory: .
+          }
+          echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
 
-      - name: Build QEMU
+      - name: Build QEMU WebAssembly
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
-          set -x
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          echo "Building QEMU for ${{ matrix.target }}..."
-          emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
+          echo "Building QEMU .wasm for ${{ matrix.target }}..."
+          emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
           if [ ! -f "${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm" ]; then
             echo "Error: .wasm file not generated!"
             exit 1
           fi
-          echo "Listing built files:"
-          ls -lh ${{ matrix.target }}/qemu-system-${{ matrix.target }}*
-        working-directory: .
+          echo "Built .wasm file:"
+          ls -lh ${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
         timeout-minutes: 15
 
-      - name: Test QEMU Binary
-        if: env.CONFIGURE_SUCCEEDED == 'true'
-        run: |
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          cd qemujs-builder/qemu/${{ matrix.target }}
-          if [ ! -f "qemu-system-${{ matrix.target }}.wasm" ]; then
-            echo "Error: QEMU .wasm binary not found!"
-            exit 1
-          fi
-          node qemu-system-${{ matrix.target }} --version || echo "Test failed, but continuing..."
-        working-directory: .
-
-      - name: Debug Built Files
-        if: env.CONFIGURE_SUCCEEDED == 'true'
-        run: |
-          cd qemujs-builder/qemu/${{ matrix.target }}
-          ls -lh qemu-system-${{ matrix.target }}*
-        working-directory: .
-
-      - name: Upload Artifacts
+      - name: Upload .wasm Artifact
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-${{ matrix.target }}
-          path: |
-            qemujs-builder/qemu/${{ matrix.target }}/qemu-system-${{ matrix.target }}.js
-            qemujs-builder/qemu/${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
+          path: qemujs-builder/qemu/${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
           if-no-files-found: error
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
@@ -135,129 +104,4 @@ jobs:
       - name: Notify Build Status
         if: always()
         run: |
-          echo "Build-from-source completed for ${{ matrix.target }} with status: ${{ job.status }}"
-
-  prebuilt-qemu-js:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-
-      - name: Install Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-
-      - name: Install Emscripten
-        run: |
-          git clone https://github.com/emscripten-core/emsdk.git
-          cd emsdk
-          ./emsdk install latest
-          ./emsdk activate latest
-          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
-          source ./emsdk_env.sh
-          echo "Emscripten version: $(emcc --version)"
-        working-directory: .
-        timeout-minutes: 10
-
-      - name: Install Build Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential python2.7 git ninja-build libsdl2-dev libglib2.0-dev libpixman-1-dev zlib1g-dev libfdt-dev libcap-dev libattr1-dev
-          sudo ln -sf /usr/bin/python2.7 /usr/bin/python
-          python --version
-
-      - name: Test Emscripten Environment
-        run: |
-          set -x
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emcc --version || { echo "Emscripten not working!"; exit 1; }
-          which emconfigure
-          emconfigure --version || { echo "emconfigure not found or broken!"; exit 1; }
-
-      - name: Fetch and Build Qemu.js with qemujs-builder
-        run: |
-          set -x
-          echo "Fetching qemujs-builder..."
-          git clone https://github.com/atrosinenko/qemujs-builder.git
-          cd qemujs-builder
-          echo "Fetching essential qemu submodule..."
-          git submodule update --init qemu || {
-            echo "Error: Submodule update failed!"
-            exit 1
-          }
-          cd qemu
-          git checkout 62e5ad0178b6cee9a81cf16e939675855e85a68b
-          mkdir build-emscripten
-          cd build-emscripten
-          echo "Configuring QEMU for Emscripten..."
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          CONFIGURE_CMD="emconfigure ../configure --python=/usr/bin/python2.7 --target-list=i386-softmmu --disable-xen"
-          echo "Running: $CONFIGURE_CMD"
-          eval "$CONFIGURE_CMD" || {
-            echo "Error: Configuration failed! See logs above."
-            exit 1
-          }
-          echo "Building QEMU..."
-          emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
-          if [ ! -f "i386-softmmu/qemu-system-i386.wasm" ]; then
-            echo "Error: qemu-system-i386.wasm not generated!"
-            exit 1
-          fi
-          echo "Listing built files:"
-          ls -lh i386-softmmu/qemu-system-i386*
-          echo "Copying build outputs..."
-          ROOT_PATH=$(pwd)/../../../
-          mkdir -p $ROOT_PATH/qemujs-binaries
-          cp i386-softmmu/qemu-system-i386.js $ROOT_PATH/qemujs-binaries/ || echo "Warning: qemu-system-i386.js not found!"
-          cp i386-softmmu/qemu-system-i386.wasm $ROOT_PATH/qemujs-binaries/ || echo "Warning: qemu-system-i386.wasm not found!"
-          cp *.data $ROOT_PATH/qemujs-binaries/ 2>/dev/null || echo "No .data files found."
-          if [ ! -f $ROOT_PATH/qemujs-binaries/shell.html ]; then
-            cat > $ROOT_PATH/qemujs-binaries/shell.html << 'EOF'
-            <!DOCTYPE html>
-            <html>
-            <head><title>QEMU.js</title></head>
-            <body><script src="qemu-system-i386.js"></script></body>
-            </html>
-            EOF
-          fi
-        working-directory: .
-
-      - name: Test Qemu.js Binary
-        run: |
-          cd qemujs-binaries
-          echo "Testing Qemu.js binary..."
-          if [ ! -f "qemu-system-i386.wasm" ]; then
-            echo "Error: qemu-system-i386.wasm not found!"
-            exit 1
-          fi
-          node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
-        working-directory: .
-
-      - name: Debug Artifacts Before Upload
-        run: |
-          cd qemujs-binaries
-          ls -lh *
-        working-directory: .
-
-      - name: Upload Qemu.js Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: qemu-js-prebuilt
-          path: |
-            qemujs-binaries/qemu-system-i386.js
-            qemujs-binaries/qemu-system-i386.wasm
-            qemujs-binaries/shell.html
-            qemujs-binaries/*.data
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Cleanup
-        run: |
-          rm -rf qemujs-builder emsdk qemujs-binaries
-
-      - name: Notify Build Status
-        if: always()
-        run: |
-          echo "Pre-built Qemu.js job completed with status: ${{ job.status }}"
+          echo "Build-wasm completed for ${{ matrix.target }} with status: ${{ job.status }}"
