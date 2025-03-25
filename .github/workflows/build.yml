@@ -84,8 +84,15 @@ jobs:
             --python=/usr/bin/python2.7 \
             --target-list=${{ matrix.target }} \
             --disable-xen \
-            --disable-pie \
-            --extra-cflags="-s USE_PTHREADS=0" \
+            --disable-system \
+            --disable-user \
+            --disable-linux-user \
+            --disable-bsd-user \
+            --disable-tools \
+            --disable-vnc \
+            --disable-sdl \
+            --disable-gtk \
+            --extra-cflags="-s USE_PTHREADS=0 -DNO_FUTEX=1" \
             --extra-ldflags="-s USE_PTHREADS=0" || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
@@ -100,7 +107,7 @@ jobs:
           cd qemujs-builder/qemu
           echo "Building QEMU .wasm for ${{ matrix.target }}..."
           emmake make -j2 V=1 \
-            CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0" \
+            CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -DNO_FUTEX=1" \
             LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -s USE_PTHREADS=0"
           if [ ! -f "${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm" ]; then
             echo "Error: .wasm file not generated!"
