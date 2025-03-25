@@ -8,7 +8,7 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "3.1.41"  # Updated from 3.1.20 to a known stable version as of March 2025
+      EMSDK_VERSION: "3.1.20"
       ARTIFACT_RETENTION_DAYS: 7
       PYTHON_VERSION: "2.7.18"
 
@@ -39,8 +39,8 @@ jobs:
           tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
           cd Python-${{ env.PYTHON_VERSION }}
           ./configure --enable-optimizations --quiet
-          make -j$(nproc) >/dev/null 2>&1
-          sudo make altinstall -s
+          make -j$(nproc)  # Removed output suppression for debugging
+          sudo make altinstall
           sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
           python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
           echo "Python 2.7 installed at $(date)"
@@ -54,12 +54,6 @@ jobs:
           restore-keys: |
             emsdk-${{ runner.os }}-
 
-      - name: Log Emscripten Cache Timing
-        run: |
-          echo "Caching Emscripten started at $(date)"
-          echo "Caching Emscripten completed at $(date)"
-
-      # Annotation: Updated Emscripten install step - removed --silent, updated version handling
       - name: Install Emscripten
         timeout-minutes: 20
         run: |
@@ -68,7 +62,6 @@ jobs:
             git clone --depth 1 https://github.com/emscripten-core/emsdk.git
           fi
           cd emsdk
-          # Removed --silent flag due to invalid option error
           ./emsdk install ${{ env.EMSDK_VERSION }}
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
@@ -104,10 +97,11 @@ jobs:
           echo "Configuring QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          # Derive architecture from target (e.g., i386 from i386-softmmu)
-          arch=${{ matrix.target }}-softmmu
-          arch=${arch%-softmmu}
+          
+          # CORRECTED ARCH DERIVATION
+          arch="${matrix.target%-softmmu}"
           echo "ARCH=$arch" >> $GITHUB_ENV
+          
           ( CFLAGS="-s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__" \
             emconfigure ./configure \
               --python=/usr/bin/python2.7 \
@@ -139,10 +133,12 @@ jobs:
           echo "Building QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          # Build specific target using derived arch
+          
           emmake make -j2 V=1 qemu-system-${{ env.ARCH }} \
             CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -s USE_PTHREADS=0"
+          
+          # CORRECTED PATH CHECK
           if [ ! -f "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm" ]; then
             echo "Error: .wasm file not generated for ${{ env.ARCH }}!"
             ls -lh ${{ matrix.target }}
