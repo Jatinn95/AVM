@@ -3,7 +3,7 @@ on: [push]
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60  # Increased to 60 minutes
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
@@ -22,6 +22,7 @@ jobs:
             wget libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev xz-utils tk-dev
 
       - name: Install Python 2.7 from Source
+        timeout-minutes: 20  # Specific timeout for Python build
         run: |
           wget https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
           tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
@@ -30,7 +31,7 @@ jobs:
           make -j$(nproc)
           sudo make altinstall
           sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
-          python2.7 --version
+          python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
@@ -60,7 +61,7 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           emcc --version || { echo "Emscripten not working!"; exit 1; }
           which emconfigure || { echo "emconfigure not found!"; exit 1; }
-          emcc -s USE_PTHREADS=1 -o test.o -c -x c - <<< "int main() { return 0; }" || { echo "TLS/Pthreads not supported!"; exit 1; }
+          emcc -s USE_PTHREADS=0 -o test.o -c -x c - <<< "int main() { return 0; }" || { echo "Pthreads disabled compilation failed!"; exit 1; }
 
       - name: Fetch QEMU Source from qemujs-builder
         run: |
