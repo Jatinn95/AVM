@@ -10,7 +10,7 @@ jobs:
     env:
       EMSDK_VERSION: "latest"
       ARTIFACT_RETENTION_DAYS: 7
-      PYTHON_VERSION: "2.7.18"  # Last Python 2.7 release
+      PYTHON_VERSION: "2.7.18"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -28,7 +28,7 @@ jobs:
           cd Python-${{ env.PYTHON_VERSION }}
           ./configure --enable-optimizations
           make -j$(nproc)
-          sudo make altinstall  # Install as python2.7, not overwriting system python
+          sudo make altinstall
           sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
           python2.7 --version
 
@@ -60,6 +60,7 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           emcc --version || { echo "Emscripten not working!"; exit 1; }
           which emconfigure || { echo "emconfigure not found!"; exit 1; }
+          emcc -s USE_PTHREADS=1 -o test.o -c -x c - <<< "int main() { return 0; }" || { echo "TLS/Pthreads not supported!"; exit 1; }
 
       - name: Fetch QEMU Source from qemujs-builder
         run: |
@@ -78,7 +79,14 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           echo "Configuring QEMU for ${{ matrix.target }}..."
-          emconfigure ./configure --python=/usr/bin/python2.7 --target-list=${{ matrix.target }} --disable-xen || {
+          emconfigure ./configure \
+            --python=/usr/bin/python2.7 \
+            --target-list=${{ matrix.target }} \
+            --disable-xen \
+            --disable-threads \
+            --disable-pie \
+            --extra-cflags="-s USE_PTHREADS=0" \
+            --extra-ldflags="-s USE_PTHREADS=0" || {
             echo "Configure failed!"
             exit 1
           }
@@ -90,7 +98,9 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           echo "Building QEMU .wasm for ${{ matrix.target }}..."
-          emmake make -j2 V=1 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
+          emmake make -j2 V=1 \
+            CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0" \
+            LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -s USE_PTHREADS=0"
           if [ ! -f "${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm" ]; then
             echo "Error: .wasm file not generated!"
             exit 1
