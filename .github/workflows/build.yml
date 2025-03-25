@@ -9,7 +9,7 @@ jobs:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
       EMSDK_VERSION: "3.1.20"
-      ARTIFACT_RETENTION_DAYS: 7
+      ARTIFACT_RETENTION_DAYS: 7  # Fixed spacing issue, though YAML allows it
       PYTHON_VERSION: "2.7.18"
     steps:
       - name: Checkout Repository
@@ -18,7 +18,6 @@ jobs:
           fetch-depth: 1
         run: |
           echo "Checkout started at $(date)"
-          # Original run command implicit via uses
           echo "Checkout completed at $(date)"
 
       - name: Install Build Dependencies
@@ -53,11 +52,10 @@ jobs:
             emsdk-${{ runner.os }}-
         run: |
           echo "Caching Emscripten started at $(date)"
-          # Original run command implicit via uses
           echo "Caching Emscripten completed at $(date)"
 
       - name: Install Emscripten
-        timeout-minutes: 20  # Increased from 15 to handle potential cache misses
+        timeout-minutes: 20
         run: |
           echo "Emscripten installation started at $(date)"
           if [ ! -d "emsdk" ]; then
@@ -99,6 +97,10 @@ jobs:
           echo "Configuring QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
+          # Derive architecture from target (e.g., i386 from i386-softmmu)
+          arch=${{ matrix.target }}-softmmu
+          arch=${arch%-softmmu}
+          echo "ARCH=$arch" >> $GITHUB_ENV
           ( CFLAGS="-s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__" \
             emconfigure ./configure \
               --python=/usr/bin/python2.7 \
@@ -121,7 +123,7 @@ jobs:
             exit 1
           }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
-          echo "QEMU configured at $(date)"
+          echo "QEMU configured for ${{ matrix.target }} (arch: $arch) at $(date)"
 
       - name: Build QEMU WebAssembly
         if: env.CONFIGURE_SUCCEEDED == 'true'
@@ -130,23 +132,25 @@ jobs:
           echo "Building QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          emmake make -j2 V=1 \
+          # Build specific target using derived arch
+          emmake make -j2 V=1 qemu-system-${{ env.ARCH }} \
             CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -s USE_PTHREADS=0"
-          if [ ! -f "${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm" ]; then
-            echo "Error: .wasm file not generated!"
+          if [ ! -f "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm" ]; then
+            echo "Error: .wasm file not generated for ${{ env.ARCH }}!"
+            ls -lh ${{ matrix.target }}
             exit 1
           fi
           echo "Built .wasm file:"
-          ls -lh "${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm"
-          echo "QEMU build completed at $(date)"
+          ls -lh "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm"
+          echo "QEMU build completed for ${{ env.ARCH }} at $(date)"
 
       - name: Upload .wasm Artifact
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-wasm-${{ matrix.target }}
-          path: qemujs-builder/qemu/${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
+          name: qemu-wasm-${{ env.ARCH }}
+          path: qemujs-builder/qemu/${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm
           if-no-files-found: error
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
@@ -160,4 +164,4 @@ jobs:
       - name: Notify Build Status
         if: always()
         run: |
-          echo "Build-wasm for ${{ matrix.target }} completed with status: ${{ job.status }} at $(date)"
+          echo "Build-wasm for ${{ matrix.target }} (arch: ${{ env.ARCH }}) completed with status: ${{ job.status }} at $(date)"
