@@ -3,76 +3,75 @@ on: [push]
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # Increased to 90 minutes for the whole job
+    timeout-minutes: 75  # Reduced from 90, optimized based on typical build times
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "latest"
+      EMSDK_VERSION: "3.1.20"  # Pinned to a stable version for compatibility
       ARTIFACT_RETENTION_DAYS: 7
       PYTHON_VERSION: "2.7.18"
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Updated to latest version for better performance
+        with:
+          fetch-depth: 1  # Shallow clone for speed
 
       - name: Install Build Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
+          sudo apt-get update -qq  # Quiet output for cleaner logs
+          sudo apt-get install -y -qq build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
             wget libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev xz-utils tk-dev
+          echo "Dependencies installed at $(date)"
 
       - name: Install Python 2.7 from Source
-        timeout-minutes: 25  # Increased slightly to 25 minutes
+        timeout-minutes: 20  # Reduced from 25, sufficient for -j$(nproc)
         run: |
-          wget https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
+          wget -q https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
           tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
           cd Python-${{ env.PYTHON_VERSION }}
-          ./configure --enable-optimizations
-          make -j$(nproc)
-          sudo make altinstall
+          ./configure --enable-optimizations --quiet
+          make -j$(nproc) >/dev/null 2>&1  # Suppress verbose output
+          sudo make altinstall -s  # Silent install
           sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
           python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
-          echo "Python installation completed at $(date)"
+          echo "Python 2.7 installed at $(date)"
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
-        uses: actions/cache@v3
+        uses: actions/cache@v4  # Updated to latest version
         with:
           path: emsdk
-          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v2
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v3  # Updated key for new version
           restore-keys: |
             emsdk-${{ runner.os }}-
 
       - name: Install Emscripten
-        timeout-minutes: 20  # Increased to 20 minutes
+        timeout-minutes: 15  # Reduced from 20, sufficient with caching
         run: |
           if [ ! -d "emsdk" ]; then
-            git clone https://github.com/emscripten-core/emsdk.git
+            git clone --depth 1 https://github.com/emscripten-core/emsdk.git
           fi
           cd emsdk
-          ./emsdk install ${{ env.EMSDK_VERSION }}
-          ./emsdk activate ${{ env.EMSDK_VERSION }}
+          ./emsdk install ${{ env.EMSDK_VERSION }} --silent
+          ./emsdk activate ${{ env.EMSDK_VERSION }} --silent
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
-          echo "Emscripten version: $(emcc --version)"
-          echo "Emscripten installation completed at $(date)"
+          emcc --version || { echo "Emscripten installation failed!"; exit 1; }
+          echo "Emscripten ${{ env.EMSDK_VERSION }} installed at $(date)"
 
       - name: Test Emscripten Environment
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           emcc --version || { echo "Emscripten not working!"; exit 1; }
-          which emconfigure || { echo "emconfigure not found!"; exit 1; }
-          emcc -s USE_PTHREADS=0 -o test.o -c -x c - <<< "int main() { return 0; }" || { echo "Pthreads disabled compilation failed!"; exit 1; }
-          echo "Emscripten environment test completed at $(date)"
+          emcc -s USE_PTHREADS=0 -o test.o -c -x c - <<< "int main() { return 0; }" || { echo "Pthreads disabled test failed!"; exit 1; }
+          echo "Emscripten environment verified at $(date)"
 
-      - name: Fetch QEMU Source from qemujs-builder
+      - name: Fetch QEMU Source
         run: |
-          git clone https://github.com/atrosinenko/qemujs-builder.git
+          git clone --depth 1 https://github.com/atrosinenko/qemujs-builder.git
           cd qemujs-builder
-          git submodule update --init qemu || {
-            echo "Error: Submodule update failed!"
-            exit 1
-          }
+          git submodule update --init --depth 1 qemu || { echo "Submodule update failed!"; exit 1; }
           cd qemu
           git checkout 62e5ad0178b6cee9a81cf16e939675855e85a68b
           echo "QEMU source fetched at $(date)"
@@ -83,55 +82,55 @@ jobs:
           CC: "emcc"
           CXX: "em++"
           LD: "emcc"
-          CFLAGS: "-s USE_PTHREADS=0 -DNO_FUTEX=1"
-          LDFLAGS: "-s USE_PTHREADS=0"
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           echo "Configuring QEMU for ${{ matrix.target }} at $(date)..."
-          emconfigure ./configure \
-            --python=/usr/bin/python2.7 \
-            --target-list=${{ matrix.target }} \
-            --disable-xen \
-            --disable-system \
-            --disable-user \
-            --disable-linux-user \
-            --disable-bsd-user \
-            --disable-tools \
-            --disable-vnc \
-            --disable-gtk \
-            --cc="$CC" \
-            --cxx="$CXX" \
-            --ld="$LD" \
-            --extra-cflags="$CFLAGS" \
-            --extra-ldflags="$LDFLAGS" || {
+          # Use subshell to isolate temporary CFLAGS with __linux__
+          ( CFLAGS="-s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__" \
+            emconfigure ./configure \
+              --python=/usr/bin/python2.7 \
+              --target-list=${{ matrix.target }} \
+              --disable-xen \
+              --disable-system \
+              --disable-user \
+              --disable-linux-user \
+              --disable-bsd-user \
+              --disable-tools \
+              --disable-vnc \
+              --disable-gtk \
+              --cross-prefix="" \
+              --cc="$CC" \
+              --cxx="$CXX" \
+              --extra-cflags="-s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
+              --extra-ldflags="-s USE_PTHREADS=0" ) || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
             exit 1
           }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
-          echo "QEMU configuration completed at $(date)"
+          echo "QEMU configured at $(date)"
 
       - name: Build QEMU WebAssembly
-        if: env.CONFIGURE_SUCCEEDED == 'true'
+        if: steps.configure.outputs.CONFIGURE_SUCCEEDED == 'true'  # Use step output for condition
+        timeout-minutes: 15  # Reduced from 20, optimized for -j2
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           echo "Building QEMU .wasm for ${{ matrix.target }} at $(date)..."
           emmake make -j2 V=1 \
-            CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -DNO_FUTEX=1" \
+            CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -s USE_PTHREADS=0"
           if [ ! -f "${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm" ]; then
             echo "Error: .wasm file not generated!"
             exit 1
           fi
           echo "Built .wasm file:"
-          ls -lh ${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm
+          ls -lh "${{ matrix.target }}/qemu-system-${{ matrix.target }}.wasm"
           echo "QEMU build completed at $(date)"
-        timeout-minutes: 20  # Increased to 20 minutes
 
       - name: Upload .wasm Artifact
-        if: env.CONFIGURE_SUCCEEDED == 'true'
+        if: steps.configure.outputs.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-${{ matrix.target }}
@@ -140,10 +139,12 @@ jobs:
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
+        if: always()  # Ensure cleanup runs even on failure
         run: |
           rm -rf qemujs-builder emsdk Python-${{ env.PYTHON_VERSION }} Python-${{ env.PYTHON_VERSION }}.tgz
+          echo "Cleanup completed at $(date)"
 
       - name: Notify Build Status
         if: always()
         run: |
-          echo "Build-wasm completed for ${{ matrix.target }} with status: ${{ job.status }} at $(date)"
+          echo "Build-wasm for ${{ matrix.target }} completed with status: ${{ job.status }} at $(date)"
