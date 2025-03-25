@@ -3,52 +3,63 @@ on: [push]
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
-    timeout-minutes: 75  # Reduced from 90, optimized based on typical build times
+    timeout-minutes: 75
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "3.1.20"  # Pinned to a stable version for compatibility
+      EMSDK_VERSION: "3.1.20"
       ARTIFACT_RETENTION_DAYS: 7
       PYTHON_VERSION: "2.7.18"
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4  # Updated to latest version for better performance
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # Shallow clone for speed
+          fetch-depth: 1
+        run: |
+          echo "Checkout started at $(date)"
+          # Original run command implicit via uses
+          echo "Checkout completed at $(date)"
 
       - name: Install Build Dependencies
         run: |
-          sudo apt-get update -qq  # Quiet output for cleaner logs
+          echo "Installing dependencies started at $(date)"
+          sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
             wget libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev xz-utils tk-dev
           echo "Dependencies installed at $(date)"
 
       - name: Install Python 2.7 from Source
-        timeout-minutes: 20  # Reduced from 25, sufficient for -j$(nproc)
+        timeout-minutes: 20
         run: |
+          echo "Python installation started at $(date)"
           wget -q https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
           tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
           cd Python-${{ env.PYTHON_VERSION }}
           ./configure --enable-optimizations --quiet
-          make -j$(nproc) >/dev/null 2>&1  # Suppress verbose output
-          sudo make altinstall -s  # Silent install
+          make -j$(nproc) >/dev/null 2>&1
+          sudo make altinstall -s
           sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
           python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
           echo "Python 2.7 installed at $(date)"
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
-        uses: actions/cache@v4  # Updated to latest version
+        uses: actions/cache@v4
         with:
           path: emsdk
-          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v3  # Updated key for new version
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v3
           restore-keys: |
             emsdk-${{ runner.os }}-
+        run: |
+          echo "Caching Emscripten started at $(date)"
+          # Original run command implicit via uses
+          echo "Caching Emscripten completed at $(date)"
 
       - name: Install Emscripten
-        timeout-minutes: 15  # Reduced from 20, sufficient with caching
+        timeout-minutes: 20  # Increased from 15 to handle potential cache misses
         run: |
+          echo "Emscripten installation started at $(date)"
           if [ ! -d "emsdk" ]; then
             git clone --depth 1 https://github.com/emscripten-core/emsdk.git
           fi
@@ -62,6 +73,7 @@ jobs:
 
       - name: Test Emscripten Environment
         run: |
+          echo "Testing Emscripten started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           emcc --version || { echo "Emscripten not working!"; exit 1; }
           emcc -s USE_PTHREADS=0 -o test.o -c -x c - <<< "int main() { return 0; }" || { echo "Pthreads disabled test failed!"; exit 1; }
@@ -69,6 +81,7 @@ jobs:
 
       - name: Fetch QEMU Source
         run: |
+          echo "Fetching QEMU source started at $(date)"
           git clone --depth 1 https://github.com/atrosinenko/qemujs-builder.git
           cd qemujs-builder
           git submodule update --init --depth 1 qemu || { echo "Submodule update failed!"; exit 1; }
@@ -83,10 +96,9 @@ jobs:
           CXX: "em++"
           LD: "emcc"
         run: |
+          echo "Configuring QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          echo "Configuring QEMU for ${{ matrix.target }} at $(date)..."
-          # Use subshell to isolate temporary CFLAGS with __linux__
           ( CFLAGS="-s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__" \
             emconfigure ./configure \
               --python=/usr/bin/python2.7 \
@@ -112,12 +124,12 @@ jobs:
           echo "QEMU configured at $(date)"
 
       - name: Build QEMU WebAssembly
-        if: steps.configure.outputs.CONFIGURE_SUCCEEDED == 'true'  # Use step output for condition
-        timeout-minutes: 15  # Reduced from 20, optimized for -j2
+        if: env.CONFIGURE_SUCCEEDED == 'true'
+        timeout-minutes: 15
         run: |
+          echo "Building QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
-          echo "Building QEMU .wasm for ${{ matrix.target }} at $(date)..."
           emmake make -j2 V=1 \
             CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -s USE_PTHREADS=0"
@@ -130,7 +142,7 @@ jobs:
           echo "QEMU build completed at $(date)"
 
       - name: Upload .wasm Artifact
-        if: steps.configure.outputs.CONFIGURE_SUCCEEDED == 'true'
+        if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-${{ matrix.target }}
@@ -139,8 +151,9 @@ jobs:
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
-        if: always()  # Ensure cleanup runs even on failure
+        if: always()
         run: |
+          echo "Cleanup started at $(date)"
           rm -rf qemujs-builder emsdk Python-${{ env.PYTHON_VERSION }} Python-${{ env.PYTHON_VERSION }}.tgz
           echo "Cleanup completed at $(date)"
 
