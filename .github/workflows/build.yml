@@ -8,12 +8,11 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "3.1.20"
-      ARTIFACT_RETENTION_DAYS: 7  # Consistent naming, though space was valid in YAML
+      EMSDK_VERSION: "3.1.41"  # Updated from 3.1.20 to a known stable version as of March 2025
+      ARTIFACT_RETENTION_DAYS: 7
       PYTHON_VERSION: "2.7.18"
 
     steps:
-      # Annotation: Split 'Checkout Repository' into two steps to avoid 'uses' and 'run' conflict
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -46,7 +45,6 @@ jobs:
           python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
           echo "Python 2.7 installed at $(date)"
 
-      # Annotation: Split 'Cache Emscripten SDK' to separate caching from logging
       - name: Cache Emscripten SDK
         id: cache-emsdk
         uses: actions/cache@v4
@@ -61,6 +59,7 @@ jobs:
           echo "Caching Emscripten started at $(date)"
           echo "Caching Emscripten completed at $(date)"
 
+      # Annotation: Updated Emscripten install step - removed --silent, updated version handling
       - name: Install Emscripten
         timeout-minutes: 20
         run: |
@@ -69,8 +68,9 @@ jobs:
             git clone --depth 1 https://github.com/emscripten-core/emsdk.git
           fi
           cd emsdk
-          ./emsdk install ${{ env.EMSDK_VERSION }} --silent
-          ./emsdk activate ${{ env.EMSDK_VERSION }} --silent
+          # Removed --silent flag due to invalid option error
+          ./emsdk install ${{ env.EMSDK_VERSION }}
+          ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           emcc --version || { echo "Emscripten installation failed!"; exit 1; }
@@ -152,7 +152,6 @@ jobs:
           ls -lh "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm"
           echo "QEMU build completed for ${{ env.ARCH }} at $(date)"
 
-      # Annotation: 'Upload .wasm Artifact' retains 'uses' and removes redundant 'run'
       - name: Upload .wasm Artifact
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
