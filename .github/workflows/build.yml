@@ -50,7 +50,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: emsdk
-          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v3
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v4
           restore-keys: |
             emsdk-${{ runner.os }}-
 
@@ -91,17 +91,21 @@ jobs:
         run: |
           echo "Patching QEMU configure script started at $(date)"
           cd qemujs-builder/qemu
-          # Patch configure to skip check_cc_bug()
-          sed -i 's/check_cc_bug() {/check_cc_bug() { echo "Skipping GCC bug check for Emscripten"; return 0; #/' configure
+          # Patch check_cc_bug() to skip the test
+          sed -i '/check_cc_bug() {/,/}/c\check_cc_bug() {\n    echo "Skipping GCC bug check for Emscripten"\n    return 0\n}' configure
+          # Patch architecture detection to assume x86 for Emscripten
+          sed -i '/if compile_prog "" "" ; then/a\    if [ "$cpu" = "" ] && [ "$emscripten" = "yes" ]; then\n        cpu="i386"\n    fi' configure
+          # Add Emscripten detection
+          sed -i '/check_define __EMSCRIPTEN__/a\if [ "$?" = "0" ]; then\n    emscripten=yes\nelse\n    emscripten=no\nfi' configure
           echo "QEMU configure script patched at $(date)"
 
-      - name: Create emcc Wrapper
+      - name: Create Compiler Wrappers
         run: |
-          echo "Creating emcc wrapper started at $(date)"
+          echo "Creating compiler wrappers started at $(date)"
           cd qemujs-builder/qemu
+          # emcc wrapper
           cat > emcc-wrapper.sh << 'EOF'
           #!/bin/bash
-          # Filter out -m64 and pass remaining args to emcc
           args=()
           for arg in "$@"; do
             if [[ "$arg" != "-m64" ]]; then
@@ -112,13 +116,26 @@ jobs:
           EOF
           chmod +x emcc-wrapper.sh
           echo "EMCC_WRAPPER=$(pwd)/emcc-wrapper.sh" >> $GITHUB_ENV
-          echo "emcc wrapper created at $(date)"
+          # em++ wrapper
+          cat > emxx-wrapper.sh << 'EOF'
+          #!/bin/bash
+          args=()
+          for arg in "$@"; do
+            if [[ "$arg" != "-m64" ]]; then
+              args+=("$arg")
+            fi
+          done
+          exec "${{ env.EMSDK_PATH }}/upstream/emscripten/em++" "${args[@]}"
+          EOF
+          chmod +x emxx-wrapper.sh
+          echo "EMXX_WRAPPER=$(pwd)/emxx-wrapper.sh" >> $GITHUB_ENV
+          echo "Compiler wrappers created at $(date)"
 
       - name: Configure QEMU
         id: configure
         env:
           CC: "${{ env.EMCC_WRAPPER }}"
-          CXX: "em++"
+          CXX: "${{ env.EMXX_WRAPPER }}"
           LD: "${{ env.EMCC_WRAPPER }}"
           CFLAGS: "-m32"
         shell: bash
@@ -144,8 +161,8 @@ jobs:
           ( emconfigure ./configure \
               --python=/usr/bin/python2.7 \
               --target-list=${{ matrix.target }} \
+              --enable-softmmu \
               --disable-xen \
-              --disable-system \
               --disable-user \
               --disable-linux-user \
               --disable-bsd-user \
