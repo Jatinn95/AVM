@@ -8,7 +8,7 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "3.1.56"  # Updated to a more recent stable version
+      EMSDK_VERSION: "3.1.56"
       ARTIFACT_RETENTION_DAYS: 7
       PYTHON_VERSION: "2.7.18"
 
@@ -93,13 +93,22 @@ jobs:
           CC: "emcc"
           CXX: "em++"
           LD: "emcc"
+        shell: bash  # Explicitly use Bash to support parameter expansion
         run: |
           echo "Configuring QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           
-          # CORRECTED ARCH DERIVATION
-          arch="${matrix.target%-softmmu}"
+          # Debug: Print matrix.target to verify its value
+          echo "Matrix target is: ${{ matrix.target }}"
+          
+          # Derive ARCH from matrix.target with fallback
+          arch="${{ matrix.target }}"
+          arch="${arch%-softmmu}"  # Remove '-softmmu' suffix
+          if [ -z "$arch" ]; then
+            echo "Failed to derive ARCH from ${{ matrix.target }}, falling back to sed"
+            arch=$(echo "${{ matrix.target }}" | sed 's/-softmmu$//')
+          fi
           echo "ARCH=$arch" >> $GITHUB_ENV
           
           ( emconfigure ./configure \
