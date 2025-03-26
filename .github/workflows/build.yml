@@ -41,7 +41,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: emsdk
-          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v4
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v5
+          restore-keys: |
+            emsdk-${{ runner.os }}-
 
       - name: Install Emscripten
         timeout-minutes: 20
@@ -68,12 +70,43 @@ jobs:
         run: |
           cd qemujs-builder/qemu
           
-          # Patch configure script to handle Emscripten
+          # Comprehensive patch for Emscripten compatibility
           cat << 'EOF' > emscripten.patch
           diff --git a/configure b/configure
           index abc1234..def5678 100644
           --- a/configure
           +++ b/configure
+          @@ -5890,10 +5890,12 @@ EOF
+          # Check if cc has a bug related to zeroed memory
+          check_cc_bug() {
+          +    if test "$emscripten" = "yes"; then
+          +        echo "Skipping GCC bug check for Emscripten"
+          +        return 0
+          +    fi
+              cat > $TMPC <<EOF
+              int main(void) {
+                  volatile int x = 0;
+                  if (x) return 1;
+                  return 0;
+              }
+              EOF
+              if ! compile_prog "" "" ; then
+                  return 1
+              fi
+              # Some versions of GCC have a bug where memory is not properly zeroed
+              cat > $TMPC <<EOF
+              int main(void) {
+                  volatile int x = 0;
+                  if (x) return 1;
+              #error No bug in this compiler.
+                  return 0;
+              }
+              EOF
+              if compile_prog "" "" ; then
+                  return 1
+              fi
+              return 0
+          }
           @@ -1234,6 +1234,10 @@ if test "$cpu" = ""; then
                cpu=$(uname -m)
            fi
@@ -85,13 +118,22 @@ jobs:
            # Normalise CPU for host check
            case "$cpu" in
                i386|i486|i586|i686|i86pc|BePC)
+          @@ -179,6 +179,12 @@ for opt do
+            ;;
+          esac
+          ;;
+          esac
+          +  --emscripten)
+          +    emscripten=yes
+          +    ;;
+          esac
+          done
+          +if test "$emscripten" = "yes"; then
+          +    echo "Emscripten detected"
+          +fi
           EOF
           
           git apply emscripten.patch || echo "Patch applied (or already applied)"
-
-          # Additional patches to fix target naming and compilation
-          sed -i 's/i386-softmmu/i386-softmmu:softmmu/' configure
-          sed -i 's/x86_64-softmmu/x86_64-softmmu:softmmu/' configure
 
       - name: Create Compiler Wrappers
         run: |
@@ -133,15 +175,10 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           
-          # Convert target name (e.g., i386-softmmu -> i386-softmmu:softmmu)
-          TARGET=${{ matrix.target }}
-          if [[ "$TARGET" == *"-softmmu" ]]; then
-            TARGET="${TARGET}:softmmu"
-          fi
-          
           emconfigure ./configure \
             --python=/usr/bin/python2.7 \
-            --target-list="$TARGET" \
+            --target-list=${{ matrix.target }} \
+            --enable-softmmu \
             --disable-xen \
             --disable-user \
             --disable-linux-user \
@@ -157,8 +194,7 @@ jobs:
             --disable-pie \
             --disable-werror \
             --disable-stack-protector \
-            --disable-system \
-            --disable-docs || {
+            --emscripten || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
             exit 1
@@ -172,27 +208,28 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           
-          # Get the base target name without :softmmu suffix
-          TARGET=${{ matrix.target }}
-          ARCH="${TARGET%-softmmu}"
+          ARCH="${{ matrix.target }}"
+          ARCH="${ARCH%-softmmu}"
           
           emmake make -j2 V=1 qemu-system-$ARCH \
             CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
           
-          # Check for .wasm file
-          if [ ! -f "$TARGET/qemu-system-$ARCH.wasm" ]; then
+          # Check for .wasm file in the correct directory
+          if [ ! -f "${{ matrix.target }}/qemu-system-$ARCH.wasm" ]; then
             echo "Error: .wasm file not generated for $ARCH!"
-            ls -lh $TARGET
+            ls -lh ${{ matrix.target }}
             exit 1
           fi
+          echo "Built .wasm file:"
+          ls -lh "${{ matrix.target }}/qemu-system-$ARCH.wasm"
 
       - name: Upload .wasm Artifact
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-${{ matrix.target }}
-          path: qemujs-builder/qemu/${{ matrix.target }}/qemu-system-*
+          path: qemujs-builder/qemu/${{ matrix.target }}/qemu-system-*.wasm
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
