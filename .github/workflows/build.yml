@@ -90,9 +90,10 @@ jobs:
       - name: Configure QEMU
         id: configure
         env:
-          CC: "emcc"  # Corrected to just emcc
+          CC: "emcc"
           CXX: "em++"
           LD: "emcc"
+          CFLAGS: "-m32"  # Force 32-bit target in environment
         shell: bash
         run: |
           echo "Configuring QEMU started at $(date)"
@@ -131,7 +132,8 @@ jobs:
               --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1" \
               --disable-pie \
               --disable-werror \
-              --disable-stack-protector ) || {
+              --disable-stack-protector \
+              --disable-gcc-checks ) || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
             exit 1
