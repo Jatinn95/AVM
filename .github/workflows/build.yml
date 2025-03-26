@@ -87,13 +87,40 @@ jobs:
           git checkout 62e5ad0178b6cee9a81cf16e939675855e85a68b
           echo "QEMU source fetched at $(date)"
 
+      - name: Patch QEMU Configure Script
+        run: |
+          echo "Patching QEMU configure script started at $(date)"
+          cd qemujs-builder/qemu
+          # Patch configure to skip check_cc_bug()
+          sed -i 's/check_cc_bug() {/check_cc_bug() { echo "Skipping GCC bug check for Emscripten"; return 0; #/' configure
+          echo "QEMU configure script patched at $(date)"
+
+      - name: Create emcc Wrapper
+        run: |
+          echo "Creating emcc wrapper started at $(date)"
+          cd qemujs-builder/qemu
+          cat > emcc-wrapper.sh << 'EOF'
+          #!/bin/bash
+          # Filter out -m64 and pass remaining args to emcc
+          args=()
+          for arg in "$@"; do
+            if [[ "$arg" != "-m64" ]]; then
+              args+=("$arg")
+            fi
+          done
+          exec "${{ env.EMSDK_PATH }}/upstream/emscripten/emcc" "${args[@]}"
+          EOF
+          chmod +x emcc-wrapper.sh
+          echo "EMCC_WRAPPER=$(pwd)/emcc-wrapper.sh" >> $GITHUB_ENV
+          echo "emcc wrapper created at $(date)"
+
       - name: Configure QEMU
         id: configure
         env:
-          CC: "emcc"
+          CC: "${{ env.EMCC_WRAPPER }}"
           CXX: "em++"
-          LD: "emcc"
-          CFLAGS: "-m32"  # Force 32-bit target
+          LD: "${{ env.EMCC_WRAPPER }}"
+          CFLAGS: "-m32"
         shell: bash
         run: |
           echo "Configuring QEMU started at $(date)"
@@ -113,7 +140,7 @@ jobs:
           fi
           echo "ARCH=$arch" >> $GITHUB_ENV
           
-          # Configure with Emscripten-compatible flags, fake Linux platform
+          # Configure with Emscripten-compatible flags
           ( emconfigure ./configure \
               --python=/usr/bin/python2.7 \
               --target-list=${{ matrix.target }} \
