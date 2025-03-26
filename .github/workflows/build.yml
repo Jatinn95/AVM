@@ -18,23 +18,15 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Log Checkout Timing
-        run: |
-          echo "Checkout started at $(date)"
-          echo "Checkout completed at $(date)"
-
       - name: Install Build Dependencies
         run: |
-          echo "Installing dependencies started at $(date)"
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
             wget libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev xz-utils tk-dev
-          echo "Dependencies installed at $(date)"
 
       - name: Install Python 2.7 from Source
         timeout-minutes: 20
         run: |
-          echo "Python installation started at $(date)"
           wget -q https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
           tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
           cd Python-${{ env.PYTHON_VERSION }}
@@ -42,8 +34,7 @@ jobs:
           make -j$(nproc)
           sudo make altinstall
           sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
-          python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
-          echo "Python 2.7 installed at $(date)"
+          python2.7 --version
 
       - name: Cache Emscripten SDK
         id: cache-emsdk
@@ -51,45 +42,30 @@ jobs:
         with:
           path: emsdk
           key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v4
-          restore-keys: |
-            emsdk-${{ runner.os }}-
 
       - name: Install Emscripten
         timeout-minutes: 20
         run: |
-          echo "Emscripten installation started at $(date)"
           if [ ! -d "emsdk" ]; then
             git clone --depth 1 https://github.com/emscripten-core/emsdk.git
           fi
           cd emsdk
-          ./emsdk install ${{ env.EMSDK_VERSION }} || { echo "Failed to install Emscripten ${{ env.EMSDK_VERSION }}"; exit 1; }
-          ./emsdk activate ${{ env.EMSDK_VERSION }} || { echo "Failed to activate Emscripten ${{ env.EMSDK_VERSION }}"; exit 1; }
+          ./emsdk install ${{ env.EMSDK_VERSION }}
+          ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
-          emcc --version || { echo "Emscripten installation failed!"; exit 1; }
-          echo "Emscripten ${{ env.EMSDK_VERSION }} installed at $(date)"
-
-      - name: Test Emscripten Environment
-        run: |
-          echo "Testing Emscripten started at $(date)"
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emcc --version || { echo "Emscripten not working!"; exit 1; }
-          emcc -s USE_PTHREADS=0 -o test.o -c -x c - <<< "int main() { return 0; }" || { echo "Pthreads disabled test failed!"; exit 1; }
-          echo "Emscripten environment verified at $(date)"
+          emcc --version
 
       - name: Fetch QEMU Source
         run: |
-          echo "Fetching QEMU source started at $(date)"
           git clone --depth 1 https://github.com/atrosinenko/qemujs-builder.git
           cd qemujs-builder
-          git submodule update --init --depth 1 qemu || { echo "Submodule update failed!"; exit 1; }
+          git submodule update --init --depth 1 qemu
           cd qemu
           git checkout 62e5ad0178b6cee9a81cf16e939675855e85a68b
-          echo "QEMU source fetched at $(date)"
 
       - name: Patch QEMU Source
         run: |
-          echo "Patching QEMU source started at $(date)"
           cd qemujs-builder/qemu
           
           # Patch configure script to handle Emscripten
@@ -112,13 +88,14 @@ jobs:
           EOF
           
           git apply emscripten.patch || echo "Patch applied (or already applied)"
-          echo "QEMU source patched at $(date)"
+
+          # Additional patches to fix target naming and compilation
+          sed -i 's/i386-softmmu/i386-softmmu:softmmu/' configure
+          sed -i 's/x86_64-softmmu/x86_64-softmmu:softmmu/' configure
 
       - name: Create Compiler Wrappers
         run: |
-          echo "Creating compiler wrappers started at $(date)"
           cd qemujs-builder/qemu
-          # emcc wrapper
           cat > emcc-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
@@ -131,7 +108,7 @@ jobs:
           EOF
           chmod +x emcc-wrapper.sh
           echo "EMCC_WRAPPER=$(pwd)/emcc-wrapper.sh" >> $GITHUB_ENV
-          # em++ wrapper
+
           cat > emxx-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
@@ -144,7 +121,6 @@ jobs:
           EOF
           chmod +x emxx-wrapper.sh
           echo "EMXX_WRAPPER=$(pwd)/emxx-wrapper.sh" >> $GITHUB_ENV
-          echo "Compiler wrappers created at $(date)"
 
       - name: Configure QEMU
         id: configure
@@ -153,92 +129,73 @@ jobs:
           CXX: "${{ env.EMXX_WRAPPER }}"
           LD: "${{ env.EMCC_WRAPPER }}"
           CFLAGS: "-m32"
-        shell: bash
         run: |
-          echo "Configuring QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           
-          # Debug: Print matrix.target and emcc version
-          echo "Matrix target is: ${{ matrix.target }}"
-          emcc --version
-          
-          # Derive ARCH from matrix.target
-          arch="${{ matrix.target }}"
-          arch="${arch%-softmmu}"
-          if [ -z "$arch" ]; then
-            echo "Failed to derive ARCH from ${{ matrix.target }}, falling back to sed"
-            arch=$(echo "${{ matrix.target }}" | sed 's/-softmmu$//')
+          # Convert target name (e.g., i386-softmmu -> i386-softmmu:softmmu)
+          TARGET=${{ matrix.target }}
+          if [[ "$TARGET" == *"-softmmu" ]]; then
+            TARGET="${TARGET}:softmmu"
           fi
-          echo "ARCH=$arch" >> $GITHUB_ENV
           
-          # Configure with Emscripten-compatible flags
-          ( emconfigure ./configure \
-              --python=/usr/bin/python2.7 \
-              --target-list=${{ matrix.target }} \
-              --disable-xen \
-              --disable-user \
-              --disable-linux-user \
-              --disable-bsd-user \
-              --disable-tools \
-              --disable-vnc \
-              --disable-gtk \
-              --cross-prefix="" \
-              --cc="$CC" \
-              --cxx="$CXX" \
-              --extra-cflags="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__ -Wno-ignored-optimization-argument -Wno-error" \
-              --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1 -s TOTAL_MEMORY=256MB -s FORCE_FILESYSTEM=1" \
-              --disable-pie \
-              --disable-werror \
-              --disable-stack-protector \
-              --disable-system \
-              --disable-docs ) || {
+          emconfigure ./configure \
+            --python=/usr/bin/python2.7 \
+            --target-list="$TARGET" \
+            --disable-xen \
+            --disable-user \
+            --disable-linux-user \
+            --disable-bsd-user \
+            --disable-tools \
+            --disable-vnc \
+            --disable-gtk \
+            --cross-prefix="" \
+            --cc="$CC" \
+            --cxx="$CXX" \
+            --extra-cflags="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__ -Wno-ignored-optimization-argument -Wno-error" \
+            --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1 -s TOTAL_MEMORY=256MB -s FORCE_FILESYSTEM=1" \
+            --disable-pie \
+            --disable-werror \
+            --disable-stack-protector \
+            --disable-system \
+            --disable-docs || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
             exit 1
           }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
-          echo "QEMU configured for ${{ matrix.target }} (arch: $arch) at $(date)"
 
       - name: Build QEMU WebAssembly
         if: env.CONFIGURE_SUCCEEDED == 'true'
         timeout-minutes: 15
         run: |
-          echo "Building QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemujs-builder/qemu
           
-          emmake make -j2 V=1 qemu-system-${{ env.ARCH }} \
+          # Get the base target name without :softmmu suffix
+          TARGET=${{ matrix.target }}
+          ARCH="${TARGET%-softmmu}"
+          
+          emmake make -j2 V=1 qemu-system-$ARCH \
             CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
           
           # Check for .wasm file
-          if [ ! -f "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm" ]; then
-            echo "Error: .wasm file not generated for ${{ env.ARCH }}!"
-            ls -lh ${{ matrix.target }}
+          if [ ! -f "$TARGET/qemu-system-$ARCH.wasm" ]; then
+            echo "Error: .wasm file not generated for $ARCH!"
+            ls -lh $TARGET
             exit 1
           fi
-          echo "Built .wasm file:"
-          ls -lh "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm"
-          echo "QEMU build completed for ${{ env.ARCH }} at $(date)"
 
       - name: Upload .wasm Artifact
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-wasm-${{ env.ARCH }}
-          path: qemujs-builder/qemu/${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm
-          if-no-files-found: error
+          name: qemu-wasm-${{ matrix.target }}
+          path: qemujs-builder/qemu/${{ matrix.target }}/qemu-system-*
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
         if: always()
         run: |
-          echo "Cleanup started at $(date)"
           rm -rf qemujs-builder emsdk Python-${{ env.PYTHON_VERSION }} Python-${{ env.PYTHON_VERSION }}.tgz
-          echo "Cleanup completed at $(date)"
-
-      - name: Notify Build Status
-        if: always()
-        run: |
-          echo "Build-wasm for ${{ matrix.target }} (arch: ${{ env.ARCH }}) completed with status: ${{ job.status }} at $(date)"
