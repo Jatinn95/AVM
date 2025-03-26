@@ -90,9 +90,9 @@ jobs:
       - name: Configure QEMU
         id: configure
         env:
-          CC: "emcc -m32"  # Force 32-bit target directly in CC
-          CXX: "em++ -m32"
-          LD: "emcc -m32"
+          CC: "emcc"  # Corrected to just emcc
+          CXX: "em++"
+          LD: "emcc"
         shell: bash
         run: |
           echo "Configuring QEMU started at $(date)"
@@ -127,7 +127,7 @@ jobs:
               --cross-prefix="" \
               --cc="$CC" \
               --cxx="$CXX" \
-              --extra-cflags="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument -Wno-error -fno-stack-protect" \
+              --extra-cflags="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument -Wno-error" \
               --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1" \
               --disable-pie \
               --disable-werror \
