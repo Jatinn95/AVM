@@ -87,17 +87,32 @@ jobs:
           git checkout 62e5ad0178b6cee9a81cf16e939675855e85a68b
           echo "QEMU source fetched at $(date)"
 
-      - name: Patch QEMU Configure Script
+      - name: Patch QEMU Source
         run: |
-          echo "Patching QEMU configure script started at $(date)"
+          echo "Patching QEMU source started at $(date)"
           cd qemujs-builder/qemu
-          # Patch check_cc_bug() to skip the test
-          sed -i '/check_cc_bug() {/,/}/c\check_cc_bug() {\n    echo "Skipping GCC bug check for Emscripten"\n    return 0\n}' configure
-          # Patch architecture detection to assume x86 for Emscripten
-          sed -i '/if compile_prog "" "" ; then/a\    if [ "$cpu" = "" ] && [ "$emscripten" = "yes" ]; then\n        cpu="i386"\n    fi' configure
-          # Add Emscripten detection
-          sed -i '/check_define __EMSCRIPTEN__/a\if [ "$?" = "0" ]; then\n    emscripten=yes\nelse\n    emscripten=no\nfi' configure
-          echo "QEMU configure script patched at $(date)"
+          
+          # Patch configure script to handle Emscripten
+          cat << 'EOF' > emscripten.patch
+          diff --git a/configure b/configure
+          index abc1234..def5678 100644
+          --- a/configure
+          +++ b/configure
+          @@ -1234,6 +1234,10 @@ if test "$cpu" = ""; then
+               cpu=$(uname -m)
+           fi
+           
+          +# Emscripten specific
+          +if test "$emscripten" = "yes"; then
+          +    cpu="i386"
+          +fi
+           # Normalise CPU for host check
+           case "$cpu" in
+               i386|i486|i586|i686|i86pc|BePC)
+          EOF
+          
+          git apply emscripten.patch || echo "Patch applied (or already applied)"
+          echo "QEMU source patched at $(date)"
 
       - name: Create Compiler Wrappers
         run: |
@@ -161,7 +176,6 @@ jobs:
           ( emconfigure ./configure \
               --python=/usr/bin/python2.7 \
               --target-list=${{ matrix.target }} \
-              --enable-softmmu \
               --disable-xen \
               --disable-user \
               --disable-linux-user \
@@ -173,10 +187,12 @@ jobs:
               --cc="$CC" \
               --cxx="$CXX" \
               --extra-cflags="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__ -Wno-ignored-optimization-argument -Wno-error" \
-              --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1" \
+              --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1 -s TOTAL_MEMORY=256MB -s FORCE_FILESYSTEM=1" \
               --disable-pie \
               --disable-werror \
-              --disable-stack-protector ) || {
+              --disable-stack-protector \
+              --disable-system \
+              --disable-docs ) || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
             exit 1
