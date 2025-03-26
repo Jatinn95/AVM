@@ -1,4 +1,4 @@
-name: Build QEMU WebAssembly (.wasm only)
+   name: Build QEMU WebAssembly (.wasm only)
 on: [push]
 jobs:
   build-wasm:
@@ -93,7 +93,7 @@ jobs:
           CC: "emcc"
           CXX: "em++"
           LD: "emcc"
-        shell: bash  # Explicitly use Bash to support parameter expansion
+        shell: bash
         run: |
           echo "Configuring QEMU started at $(date)"
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
@@ -102,15 +102,16 @@ jobs:
           # Debug: Print matrix.target to verify its value
           echo "Matrix target is: ${{ matrix.target }}"
           
-          # Derive ARCH from matrix.target with fallback
+          # Derive ARCH from matrix.target
           arch="${{ matrix.target }}"
-          arch="${arch%-softmmu}"  # Remove '-softmmu' suffix
+          arch="${arch%-softmmu}"
           if [ -z "$arch" ]; then
             echo "Failed to derive ARCH from ${{ matrix.target }}, falling back to sed"
             arch=$(echo "${{ matrix.target }}" | sed 's/-softmmu$//')
           fi
           echo "ARCH=$arch" >> $GITHUB_ENV
           
+          # Configure with Emscripten-compatible flags
           ( emconfigure ./configure \
               --python=/usr/bin/python2.7 \
               --target-list=${{ matrix.target }} \
@@ -126,7 +127,8 @@ jobs:
               --cc="$CC" \
               --cxx="$CXX" \
               --extra-cflags="-DNO_FUTEX=1 -D__EMSCRIPTEN__" \
-              --extra-ldflags="-s USE_PTHREADS=0" ) || {
+              --extra-ldflags="-s USE_PTHREADS=0" \
+              --disable-pie ) || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
             exit 1
@@ -146,7 +148,7 @@ jobs:
             CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
           
-          # CORRECTED PATH CHECK
+          # Check for .wasm file
           if [ ! -f "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm" ]; then
             echo "Error: .wasm file not generated for ${{ env.ARCH }}!"
             ls -lh ${{ matrix.target }}
