@@ -39,7 +39,7 @@ jobs:
           tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
           cd Python-${{ env.PYTHON_VERSION }}
           ./configure --enable-optimizations --quiet
-          make -j$(nproc)  # Removed output suppression for debugging
+          make -j$(nproc)
           sudo make altinstall
           sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
           python2.7 --version || { echo "Python 2.7 installation failed!"; exit 1; }
@@ -102,8 +102,7 @@ jobs:
           arch="${matrix.target%-softmmu}"
           echo "ARCH=$arch" >> $GITHUB_ENV
           
-          ( CFLAGS="-s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__" \
-            emconfigure ./configure \
+          ( emconfigure ./configure \
               --python=/usr/bin/python2.7 \
               --target-list=${{ matrix.target }} \
               --disable-xen \
@@ -117,7 +116,7 @@ jobs:
               --cross-prefix="" \
               --cc="$CC" \
               --cxx="$CXX" \
-              --extra-cflags="-s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
+              --extra-cflags="-DNO_FUTEX=1 -D__EMSCRIPTEN__" \
               --extra-ldflags="-s USE_PTHREADS=0" ) || {
             echo "Configure failed! Dumping config.log for debugging:"
             cat config.log
@@ -135,8 +134,8 @@ jobs:
           cd qemujs-builder/qemu
           
           emmake make -j2 V=1 qemu-system-${{ env.ARCH }} \
-            CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
-            LDFLAGS="-s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -s USE_PTHREADS=0"
+            CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
+            LDFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
           
           # CORRECTED PATH CHECK
           if [ ! -f "${{ matrix.target }}/qemu-system-${{ env.ARCH }}.wasm" ]; then
