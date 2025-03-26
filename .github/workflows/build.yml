@@ -8,7 +8,7 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "3.1.20"
+      EMSDK_VERSION: "3.1.56"  # Updated to a more recent stable version
       ARTIFACT_RETENTION_DAYS: 7
       PYTHON_VERSION: "2.7.18"
 
@@ -62,8 +62,8 @@ jobs:
             git clone --depth 1 https://github.com/emscripten-core/emsdk.git
           fi
           cd emsdk
-          ./emsdk install ${{ env.EMSDK_VERSION }}
-          ./emsdk activate ${{ env.EMSDK_VERSION }}
+          ./emsdk install ${{ env.EMSDK_VERSION }} || { echo "Failed to install Emscripten ${{ env.EMSDK_VERSION }}"; exit 1; }
+          ./emsdk activate ${{ env.EMSDK_VERSION }} || { echo "Failed to activate Emscripten ${{ env.EMSDK_VERSION }}"; exit 1; }
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           emcc --version || { echo "Emscripten installation failed!"; exit 1; }
