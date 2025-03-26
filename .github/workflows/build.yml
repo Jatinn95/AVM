@@ -1,4 +1,4 @@
-   name: Build QEMU WebAssembly (.wasm only)
+name: Build QEMU WebAssembly (.wasm only)
 on: [push]
 jobs:
   build-wasm:
