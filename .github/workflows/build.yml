@@ -93,6 +93,7 @@ jobs:
           CC: "emcc"
           CXX: "em++"
           LD: "emcc"
+          CFLAGS: "-m32"  # Force 32-bit target to override -m64
         shell: bash
         run: |
           echo "Configuring QEMU started at $(date)"
@@ -112,7 +113,7 @@ jobs:
           fi
           echo "ARCH=$arch" >> $GITHUB_ENV
           
-          # Configure with Emscripten-compatible flags, disable problematic features
+          # Configure with Emscripten-compatible flags
           ( emconfigure ./configure \
               --python=/usr/bin/python2.7 \
               --target-list=${{ matrix.target }} \
@@ -127,7 +128,7 @@ jobs:
               --cross-prefix="" \
               --cc="$CC" \
               --cxx="$CXX" \
-              --extra-cflags="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument" \
+              --extra-cflags="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument -Wno-error" \
               --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1" \
               --disable-pie \
               --disable-werror ) || {
