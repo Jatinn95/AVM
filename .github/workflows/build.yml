@@ -116,6 +116,14 @@ jobs:
           emmake make install
           cd ..
 
+          wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz
+          tar -xzf pcre2-10.44.tar.gz
+          cd pcre2-10.44
+          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-shared --enable-static --disable-jit
+          emmake make -j$(nproc)
+          emmake make install
+          cd ..
+
           wget https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
           tar -xf glib-2.80.0.tar.xz
           cd glib-2.80.0
