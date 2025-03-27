@@ -162,6 +162,15 @@ jobs:
           wget https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
           tar -xf glib-2.80.0.tar.xz
           cd glib-2.80.0
+          echo "Patching gio/meson.build for Emscripten..."
+          sed -i "/have_res_query = cc.links('res_query()/i\if cc.has_header('emscripten.h')\n  have_res_query = true\n  message('Emscripten detected, skipping res_query() check')\nelse" gio/meson.build
+          sed -i "/have_res_query = cc.links('res_query()/a\endif" gio/meson.build
+          echo "Patched gio/meson.build snippet:"
+          grep -A 10 "res_query" gio/meson.build
+          if ! grep -q "emscripten.h" gio/meson.build; then
+            echo "Error: Failed to patch gio/meson.build for Emscripten!"
+            exit 1
+          fi
           echo "Setting up Meson for GLib..."
           meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --wrap-mode=nofallback -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false -Dxattr=false
           meson compile -C build
