@@ -75,7 +75,7 @@ jobs:
           wget https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz
           tar -xzf libffi-3.4.6.tar.gz
           cd libffi-3.4.6
-          sed -i '1i#include <stdlib.h>\n#ifndef __EMSCRIPTEN__' src/tramp.c
+          sed -i '1i#include <stdlib.h>\n#include <stdbool.h>\n#ifndef __EMSCRIPTEN__' src/tramp.c
           sed -i '$a#else\n/* Emscripten stubs */\nvoid ffi_tramp_init(void) {}\nvoid *tramp_table_alloc(void) { return NULL; }\nvoid ffi_tramp_free(void *tramp) {}\nbool tramp_table_map(void *table) { return false; }\nvoid tramp_table_unmap(void *table) {}\nvoid ffi_tramp_lock(void) {}\nvoid ffi_tramp_unlock(void) {}\nbool ffi_tramp_init_os(void) { return false; }\n#endif' src/tramp.c
           echo "Patched tramp.c snippet (start):"
           head -n 10 src/tramp.c
@@ -83,6 +83,10 @@ jobs:
           tail -n 10 src/tramp.c
           if ! grep -q "stdlib.h" src/tramp.c; then
             echo "Error: Failed to add stdlib.h to tramp.c!"
+            exit 1
+          fi
+          if ! grep -q "stdbool.h" src/tramp.c; then
+            echo "Error: Failed to add stdbool.h to tramp.c!"
             exit 1
           fi
           if ! grep -q "#ifndef __EMSCRIPTEN__" src/tramp.c; then
