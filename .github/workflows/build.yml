@@ -40,6 +40,22 @@ jobs:
           source ./emsdk_env.sh
           emcc --version || { echo "Emscripten setup failed"; exit 1; }
 
+      - name: Install GLib for Emscripten
+        run: |
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          mkdir -p glib-build
+          cd glib-build
+          wget https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
+          tar -xf glib-2.80.0.tar.xz
+          cd glib-2.80.0
+          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-libmount --disable-selinux
+          emmake make -j$(nproc)
+          emmake make install
+          if [ ! -f "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" ]; then
+            echo "Error: glib-2.0.pc not installed!"
+            exit 1
+          fi
+
       - name: Fetch QEMU Source
         run: |
           git clone --depth 1 --branch ${{ env.QEMU_VERSION }} https://github.com/qemu/qemu.git || {
@@ -60,26 +76,30 @@ jobs:
           cd qemu
           # Skip compiler bug checks
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          # Force host OS to linux and disable bogus_os
+          # Force host OS to linux
           sed -i '/uname -s/i\# Force host OS for Emscripten on Linux\nhost_os=linux\nbogus_os=no\necho "DEBUG pre-uname: host_os=$host_os, bogus_os=$bogus_os"' configure
           # Debug after compiler setup
           sed -i '/cc="$cross_cc"/a\echo "DEBUG post-cc: host_os=$host_os, bogus_os=$bogus_os"' configure
           # Bypass unrecognized OS error
           sed -i 's/error_exit "Unrecognized host OS \(.*\)"/if [ "$host_os" = "linux" ]; then echo "DEBUG: Bypassing unrecognized OS error for linux"; else echo "DEBUG: Unrecognized host OS ($1)"; error_exit "Unrecognized host OS ($1)"; fi/' configure
-          # Bypass Meson compiler version check for Emscripten with single quotes
+          # Bypass Meson compiler version check
           sed -i "/error.*You either need GCC v7.4/i\if cc.has_header('emscripten.h')\n  message('Emscripten detected, skipping version check')\nelse" meson.build
           sed -i '/error.*You either need GCC v7.4/a\endif' meson.build
+          # Skip Hypervisor framework for Emscripten
+          sed -i "/appleframeworks_dep = dependency('appleframeworks'/i\if cc.has_header('emscripten.h')\n  appleframeworks_dep = declare_dependency()\nelse" meson.build
+          sed -i "/appleframeworks_dep = dependency('appleframeworks'/a\endif" meson.build
           # Verify patches
           echo "Patched configure snippet:"
           head -n 100 configure
           echo "Patched meson.build snippet:"
+          grep -A 10 "appleframeworks" meson.build
           grep -A 10 "You either need GCC" meson.build
           if ! grep -q "host_os=linux" configure; then
             echo "Error: Patch failed to apply host_os=linux!"
             exit 1
           fi
           if ! grep -q "emscripten.h" meson.build; then
-            echo "Error: Patch failed to apply Meson Emscripten check!"
+            echo "Error: Patch failed to apply Meson Emscripten checks!"
             exit 1
           fi
 
@@ -129,10 +149,11 @@ jobs:
           CXX: "${{ env.EMXX_WRAPPER }}"
           LD: "${{ env.EMCC_WRAPPER }}"
           TARGET_ARCH: ${{ matrix.target == 'i386-softmmu' && 'i386' || 'x86_64' }}
+          PKG_CONFIG: "${{ env.EMSDK_PATH }}/upstream/emscripten/em_pkg_config.py"
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          echo "DEBUG: CC=$CC, CXX=$CXX"
+          echo "DEBUG: CC=$CC, CXX=$CXX, PKG_CONFIG=$PKG_CONFIG"
           if [ "$TARGET_ARCH" = "i386" ]; then
             EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           else
@@ -140,6 +161,7 @@ jobs:
           fi
           export CC="${{ env.EMCC_WRAPPER }}"
           export CXX="${{ env.EMXX_WRAPPER }}"
+          export PKG_CONFIG="${{ env.EMSDK_PATH }}/upstream/emscripten/em_pkg_config.py"
           emconfigure ./configure \
             --python=python3 \
             --target-list="${{ matrix.target }}" \
