@@ -75,17 +75,15 @@ jobs:
           wget https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz
           tar -xzf libffi-3.4.6.tar.gz
           cd libffi-3.4.6
-          sed -i '1i#include <stdlib.h>' src/tramp.c
-          sed -i '/#ifdef __EMSCRIPTEN__/a#define NO_TRAMPOLINE 1' src/tramp.c
-          sed -i '1i#ifdef __EMSCRIPTEN__\n#endif' src/tramp.c
+          sed -i '1i#include <stdlib.h>\n#ifdef __EMSCRIPTEN__\nvoid *tramp_table_alloc(void) { return NULL; }\n#endif' src/tramp.c
           echo "Patched tramp.c snippet:"
           head -n 10 src/tramp.c
           if ! grep -q "stdlib.h" src/tramp.c; then
             echo "Error: Failed to add stdlib.h to tramp.c!"
             exit 1
           fi
-          if ! grep -q "NO_TRAMPOLINE" src/tramp.c; then
-            echo "Error: Failed to add NO_TRAMPOLINE define to tramp.c!"
+          if ! grep -q "tramp_table_alloc" src/tramp.c; then
+            echo "Error: Failed to stub tramp_table_alloc in tramp.c!"
             exit 1
           fi
           emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-builddir --disable-multi-os-directory --disable-shared --enable-static
