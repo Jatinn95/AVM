@@ -1,4 +1,4 @@
-name: Build QEMU WebAssembly (.wasm only)
+name: Build QEMU WebAssembly (.wasp only)
 on: [push]
 jobs:
   build-wasm:
@@ -33,7 +33,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build \
-            zlib1g-dev libfdt-dev libcap-dev libattr1-dev wget libssl-dev
+            zlib1g-dev libfdt-dev libcap-dev libattr1-dev wget libssl-dev pkg-config
 
       - name: Install Emscripten
         timeout-minutes: 20
@@ -53,9 +53,8 @@ jobs:
           cd emscripten-libs
 
           export PKG_CONFIG_PATH="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig"
-          export PKG_CONFIG="${{ env.EMSDK_PATH }}/upstream/emscripten/em_pkg_config.py"
           echo "Verifying pkg-config setup:"
-          $PKG_CONFIG --version || { echo "Error: pkg-config not found!"; exit 1; }
+          pkg-config --version || { echo "Error: pkg-config not found!"; exit 1; }
 
           cat > emscripten-cross.txt << 'EOF'
           [binaries]
@@ -63,7 +62,7 @@ jobs:
           cpp = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/em++'
           ar = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/emar'
           strip = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/emstrip'
-          pkg-config = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/em_pkg_config.py'
+          pkg-config = 'pkg-config'
 
           [properties]
           needs_exe_wrapper = true
@@ -155,7 +154,7 @@ jobs:
             exit 1
           fi
           echo "Verifying pcre2 installation:"
-          $PKG_CONFIG --modversion libpcre2-8 || { echo "Error: pkg-config cannot find libpcre2-8!"; exit 1; }
+          pkg-config --modversion libpcre2-8 || { echo "Error: pkg-config cannot find libpcre2-8!"; exit 1; }
           cd ..
 
           echo "Installing GLib..."
@@ -257,11 +256,10 @@ jobs:
           CXX: "${{ env.EMXX_WRAPPER }}"
           LD: "${{ env.EMCC_WRAPPER }}"
           TARGET_ARCH: ${{ matrix.target == 'i386-softmmu' && 'i386' || 'x86_64' }}
-          PKG_CONFIG: "${{ env.EMSDK_PATH }}/upstream/emscripten/em_pkg_config.py"
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          echo "DEBUG: CC=$CC, CXX=$CXX, PKG_CONFIG=$PKG_CONFIG"
+          echo "DEBUG: CC=$CC, CXX=$CXX"
           if [ "$TARGET_ARCH" = "i386" ]; then
             EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           else
@@ -269,7 +267,6 @@ jobs:
           fi
           export CC="${{ env.EMCC_WRAPPER }}"
           export CXX="${{ env.EMXX_WRAPPER }}"
-          export PKG_CONFIG="${{ env.EMSDK_PATH }}/upstream/emscripten/em_pkg_config.py"
           emconfigure ./configure \
             --python=python3 \
             --target-list="${{ matrix.target }}" \
