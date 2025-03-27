@@ -53,7 +53,7 @@ jobs:
             }
           }
           cd qemu
-          git log -1  # Confirm version
+          git log -1
 
       - name: Patch QEMU Source for Emscripten
         run: |
@@ -86,7 +86,7 @@ jobs:
           args=()
           for arg in "$@"; do
               case "$arg" in
-                  "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits")
+                  "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits"|"-m64"|"-mcx16")
                       continue
                       ;;
                   *)
@@ -104,7 +104,7 @@ jobs:
           args=()
           for arg in "$@"; do
               case "$arg" in
-                  "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits")
+                  "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits"|"-m64"|"-mcx16")
                       continue
                       ;;
                   *)
@@ -129,7 +129,7 @@ jobs:
           cd qemu
 
           if [ "$TARGET_ARCH" = "i386" ]; then
-            EXTRA_CFLAGS="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
+            EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           else
             EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           fi
@@ -153,8 +153,9 @@ jobs:
             --disable-werror \
             --disable-stack-protector \
             --disable-docs || {
-              echo "Configure failed! Dumping config.log:"
+              echo "Configure failed! Dumping logs:"
               cat config.log || echo "No config.log generated"
+              cat build/meson-logs/meson-log.txt || echo "No meson-log.txt generated"
               exit 1
             }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
