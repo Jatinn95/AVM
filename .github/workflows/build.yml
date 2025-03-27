@@ -53,7 +53,7 @@ jobs:
             }
           }
           cd qemu
-          git log -1
+          git log -1  # Confirm version
 
       - name: Patch QEMU Source for Emscripten
         run: |
@@ -62,11 +62,10 @@ jobs:
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
           # Force host OS to linux and disable bogus_os before OS check
           sed -i '/uname -s/i\# Force host OS for Emscripten on Linux\nhost_os=linux\nbogus_os=no\necho "DEBUG pre-uname: host_os=$host_os, bogus_os=$bogus_os"' configure
-          # Add debug after compiler setup
+          # Debug after compiler setup
           sed -i '/cc="$cross_cc"/a\echo "DEBUG post-cc: host_os=$host_os, bogus_os=$bogus_os"' configure
-          # Bypass error if host_os=linux
-          sed -i '/error_exit "Unrecognized host OS"/i\if [ "$host_os" = "linux" ]; then\n    echo "DEBUG: Bypassing unrecognized OS error for linux"\nelse\n    echo "DEBUG before error: host_os=$host_os, bogus_os=$bogus_os"' configure
-          sed -i 's/error_exit "Unrecognized host OS"/fi &/' configure
+          # Replace all unrecognized OS errors with bypass
+          sed -i 's/error_exit "Unrecognized host OS \(.*\)"/if [ "$host_os" = "linux" ]; then echo "DEBUG: Bypassing unrecognized OS error for linux"; else echo "DEBUG: Unrecognized host OS ($1)"; error_exit "Unrecognized host OS ($1)"; fi/' configure
           # Verify patch applied
           echo "Patched configure snippet:"
           head -n 100 configure
