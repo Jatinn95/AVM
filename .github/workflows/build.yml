@@ -114,7 +114,7 @@ jobs:
             --python=python3 \
             --target-list="${{ matrix.target }}" \
             --disable-xen \
-            --disable-userthur \
+            --disable-user \
             --disable-linux-user \
             --disable-bsd-user \
             --disable-tools \
@@ -130,7 +130,7 @@ jobs:
             --disable-stack-protector \
             --disable-docs || {
               echo "Configure failed! Dumping config.log:"
-              cat config.log
+              cat config.log || echo "No config.log generated"
               exit 1
             }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
