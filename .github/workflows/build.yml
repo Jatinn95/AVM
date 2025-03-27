@@ -163,10 +163,10 @@ jobs:
           tar -xf glib-2.80.0.tar.xz
           cd glib-2.80.0
           echo "Patching gio/meson.build for Emscripten..."
-          sed -i "/have_res_query = cc.links('res_query()/i\if cc.has_header('emscripten.h')\n  have_res_query = true\n  message('Emscripten detected, skipping res_query() check')\nelse" gio/meson.build
-          sed -i "/have_res_query = cc.links('res_query()/a\endif" gio/meson.build
+          sed -i "/# res_query()/a\if cc.has_header('emscripten.h')\n  have_res_query = true\n  message('Emscripten detected, skipping res_query() check')\nelse" gio/meson.build
+          sed -i "/if not cc.links(res_query_test_full, name : 'res_query()')/a\endif" gio/meson.build
           echo "Patched gio/meson.build snippet:"
-          grep -A 10 "res_query" gio/meson.build
+          grep -A 15 "# res_query()" gio/meson.build
           if ! grep -q "emscripten.h" gio/meson.build; then
             echo "Error: Failed to patch gio/meson.build for Emscripten!"
             exit 1
