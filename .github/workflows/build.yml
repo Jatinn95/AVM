@@ -46,7 +46,6 @@ jobs:
           mkdir -p emscripten-libs
           cd emscripten-libs
 
-          # Create cross-file for Emscripten
           cat > emscripten-cross.txt << 'EOF'
           [binaries]
           c = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/emcc'
@@ -65,7 +64,6 @@ jobs:
           endian = 'little'
           EOF
 
-          # Install zlib
           wget https://zlib.net/zlib-1.3.1.tar.gz
           tar -xzf zlib-1.3.1.tar.gz
           cd zlib-1.3.1
@@ -74,18 +72,27 @@ jobs:
           emmake make install
           cd ..
 
-          # Install libffi with patch
           wget https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz
           tar -xzf libffi-3.4.6.tar.gz
           cd libffi-3.4.6
-          sed -i '/#include <ffi.h>/a#include <stdlib.h>' src/tramp.c
-          sed -i 's/tramp_table_map/tramp_table_alloc/' src/tramp.c
+          sed -i '1i#include <stdlib.h>' src/tramp.c
+          sed -i '/#ifdef __EMSCRIPTEN__/a#define NO_TRAMPOLINE 1' src/tramp.c
+          sed -i '1i#ifdef __EMSCRIPTEN__\n#endif' src/tramp.c
+          echo "Patched tramp.c snippet:"
+          head -n 10 src/tramp.c
+          if ! grep -q "stdlib.h" src/tramp.c; then
+            echo "Error: Failed to add stdlib.h to tramp.c!"
+            exit 1
+          fi
+          if ! grep -q "NO_TRAMPOLINE" src/tramp.c; then
+            echo "Error: Failed to add NO_TRAMPOLINE define to tramp.c!"
+            exit 1
+          fi
           emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-builddir --disable-multi-os-directory --disable-shared --enable-static
           emmake make -j$(nproc)
           emmake make install
           cd ..
 
-          # Install GLib
           wget https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
           tar -xf glib-2.80.0.tar.xz
           cd glib-2.80.0
