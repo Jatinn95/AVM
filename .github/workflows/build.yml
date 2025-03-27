@@ -60,17 +60,19 @@ jobs:
           cd qemu
           # Skip compiler bug checks
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          # Force host OS to linux and disable bogus_os
-          sed -i '/#!\/bin\/sh/a\# Force host OS for Emscripten on Linux\nhost_os=linux\nbogus_os=no' configure
-          # Add debug before OS check fails
+          # Force host OS to linux and disable bogus_os before OS check
+          sed -i '/uname -s/i\# Force host OS for Emscripten on Linux\nhost_os=linux\nbogus_os=no\necho "DEBUG pre-uname: host_os=$host_os, bogus_os=$bogus_os"' configure
+          # Debug before error exit
           sed -i '/error_exit "Unrecognized host OS"/i\echo "DEBUG before error: host_os=$host_os, bogus_os=$bogus_os"' configure
-          # Add debug early in script to confirm settings
-          sed -i '/#!\/bin\/sh/a\echo "DEBUG early: host_os=$host_os, bogus_os=$bogus_os"' configure
           # Verify patch applied
           echo "Patched configure snippet:"
-          head -n 20 configure
+          head -n 50 configure
           if ! grep -q "host_os=linux" configure; then
-            echo "Error: Patch failed to apply!"
+            echo "Error: Patch failed to apply host_os=linux!"
+            exit 1
+          fi
+          if ! grep -q "bogus_os=no" configure; then
+            echo "Error: Patch failed to apply bogus_os=no!"
             exit 1
           fi
 
