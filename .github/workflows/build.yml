@@ -43,14 +43,53 @@ jobs:
       - name: Install GLib for Emscripten
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          mkdir -p glib-build
-          cd glib-build
+          mkdir -p emscripten-libs
+          cd emscripten-libs
+
+          # Create cross-file for Emscripten
+          cat > emscripten-cross.txt << 'EOF'
+          [binaries]
+          c = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/emcc'
+          cpp = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/em++'
+          ar = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/emar'
+          strip = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/emstrip'
+          pkgconfig = '/home/runner/work/AVM/AVM/emsdk/upstream/emscripten/em_pkg_config.py'
+
+          [properties]
+          needs_exe_wrapper = true
+
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm32'
+          cpu = 'wasm32'
+          endian = 'little'
+          EOF
+
+          # Install zlib
+          wget https://zlib.net/zlib-1.3.1.tar.gz
+          tar -xzf zlib-1.3.1.tar.gz
+          cd zlib-1.3.1
+          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --static
+          emmake make -j$(nproc)
+          emmake make install
+          cd ..
+
+          # Install libffi
+          wget https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz
+          tar -xzf libffi-3.4.6.tar.gz
+          cd libffi-3.4.6
+          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-builddir --disable-multi-os-directory
+          emmake make -j$(nproc)
+          emmake make install
+          cd ..
+
+          # Install GLib
           wget https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
           tar -xf glib-2.80.0.tar.xz
           cd glib-2.80.0
-          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-libmount --disable-selinux
-          emmake make -j$(nproc)
-          emmake make install
+          meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false
+          meson compile -C build
+          meson install -C build
           if [ ! -f "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" ]; then
             echo "Error: glib-2.0.pc not installed!"
             exit 1
@@ -74,21 +113,14 @@ jobs:
       - name: Patch QEMU Source for Emscripten
         run: |
           cd qemu
-          # Skip compiler bug checks
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          # Force host OS to linux
           sed -i '/uname -s/i\# Force host OS for Emscripten on Linux\nhost_os=linux\nbogus_os=no\necho "DEBUG pre-uname: host_os=$host_os, bogus_os=$bogus_os"' configure
-          # Debug after compiler setup
           sed -i '/cc="$cross_cc"/a\echo "DEBUG post-cc: host_os=$host_os, bogus_os=$bogus_os"' configure
-          # Bypass unrecognized OS error
           sed -i 's/error_exit "Unrecognized host OS \(.*\)"/if [ "$host_os" = "linux" ]; then echo "DEBUG: Bypassing unrecognized OS error for linux"; else echo "DEBUG: Unrecognized host OS ($1)"; error_exit "Unrecognized host OS ($1)"; fi/' configure
-          # Bypass Meson compiler version check
           sed -i "/error.*You either need GCC v7.4/i\if cc.has_header('emscripten.h')\n  message('Emscripten detected, skipping version check')\nelse" meson.build
           sed -i '/error.*You either need GCC v7.4/a\endif' meson.build
-          # Skip Hypervisor framework for Emscripten
           sed -i "/appleframeworks_dep = dependency('appleframeworks'/i\if cc.has_header('emscripten.h')\n  appleframeworks_dep = declare_dependency()\nelse" meson.build
           sed -i "/appleframeworks_dep = dependency('appleframeworks'/a\endif" meson.build
-          # Verify patches
           echo "Patched configure snippet:"
           head -n 100 configure
           echo "Patched meson.build snippet:"
@@ -219,4 +251,4 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          rm -rf qemu emsdk
+          rm -rf qemu emsdk emscripten-libs
