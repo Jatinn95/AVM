@@ -8,9 +8,9 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "3.1.62"  # Updated to latest stable as of March 2025
+      EMSDK_VERSION: "3.1.62"
       ARTIFACT_RETENTION_DAYS: 7
-      PYTHON_VERSION: "3.11"   # Modern Python, QEMU supports Python 3 since 4.0
+      PYTHON_VERSION: "3.11"
 
     steps:
       - name: Checkout Repository
@@ -40,22 +40,23 @@ jobs:
 
       - name: Fetch QEMU Source
         run: |
-          git clone --depth 1 https://github.com/qemu/qemu.git
+          git clone https://github.com/qemu/qemu.git
           cd qemu
-          git checkout v8.2.2  # Use a stable, recent QEMU release (March 2025)
+          git fetch --tags
+          git checkout v9.0.0 || {
+            echo "Tag v9.0.0 not found, falling back to latest master"
+            git checkout master
+          }
 
       - name: Patch QEMU Source for Emscripten
         run: |
           cd qemu
-          # Skip unnecessary compiler bug checks
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          # Detect Emscripten environment
           sed -i '/check_define __EMSCRIPTEN__/a\if test "$?" = "0"; then\n    emscripten=yes\nelse\n    emscripten=no\nfi' configure
 
       - name: Create Compiler Wrappers
         run: |
           cd qemu
-          # emcc wrapper to filter problematic flags
           cat > emcc-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
@@ -74,7 +75,6 @@ jobs:
           chmod +x emcc-wrapper.sh
           echo "EMCC_WRAPPER=$(pwd)/emcc-wrapper.sh" >> $GITHUB_ENV
 
-          # em++ wrapper
           cat > emxx-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
@@ -104,7 +104,6 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
 
-          # Adjust flags based on target architecture
           if [ "$TARGET_ARCH" = "i386" ]; then
             EXTRA_CFLAGS="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           else
@@ -115,7 +114,7 @@ jobs:
             --python=python3 \
             --target-list="${{ matrix.target }}" \
             --disable-xen \
-            --disable-user \
+            --disable-userthur \
             --disable-linux-user \
             --disable-bsd-user \
             --disable-tools \
