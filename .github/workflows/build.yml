@@ -22,6 +22,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Install Meson
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install meson
+          meson --version || { echo "Meson installation failed"; exit 1; }
+
       - name: Install Build Dependencies
         run: |
           sudo apt-get update -qq
