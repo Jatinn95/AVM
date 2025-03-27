@@ -119,7 +119,7 @@ jobs:
           wget https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
           tar -xf glib-2.80.0.tar.xz
           cd glib-2.80.0
-          meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --wrap-mode=nodownload -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false
+          meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --wrap-mode=nofallback -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false
           meson compile -C build
           meson install -C build
           if [ ! -f "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" ]; then
