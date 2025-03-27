@@ -51,8 +51,12 @@ jobs:
       - name: Patch QEMU Source for Emscripten
         run: |
           cd qemu
+          # Skip compiler bug checks
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
+          # Detect Emscripten environment
           sed -i '/check_define __EMSCRIPTEN__/a\if test "$?" = "0"; then\n    emscripten=yes\nelse\n    emscripten=no\nfi' configure
+          # Force host OS to Linux for Emscripten builds
+          sed -i '/host_os=/i\if test "$emscripten" = "yes"; then\n    host_os=linux\nfi' configure
 
       - name: Create Compiler Wrappers
         run: |
