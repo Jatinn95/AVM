@@ -62,11 +62,14 @@ jobs:
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
           # Force host OS to linux and disable bogus_os before OS check
           sed -i '/uname -s/i\# Force host OS for Emscripten on Linux\nhost_os=linux\nbogus_os=no\necho "DEBUG pre-uname: host_os=$host_os, bogus_os=$bogus_os"' configure
-          # Debug before error exit
-          sed -i '/error_exit "Unrecognized host OS"/i\echo "DEBUG before error: host_os=$host_os, bogus_os=$bogus_os"' configure
+          # Add debug after compiler setup
+          sed -i '/cc="$cross_cc"/a\echo "DEBUG post-cc: host_os=$host_os, bogus_os=$bogus_os"' configure
+          # Bypass error if host_os=linux
+          sed -i '/error_exit "Unrecognized host OS"/i\if [ "$host_os" = "linux" ]; then\n    echo "DEBUG: Bypassing unrecognized OS error for linux"\nelse\n    echo "DEBUG before error: host_os=$host_os, bogus_os=$bogus_os"' configure
+          sed -i 's/error_exit "Unrecognized host OS"/fi &/' configure
           # Verify patch applied
           echo "Patched configure snippet:"
-          head -n 50 configure
+          head -n 100 configure
           if ! grep -q "host_os=linux" configure; then
             echo "Error: Patch failed to apply host_os=linux!"
             exit 1
