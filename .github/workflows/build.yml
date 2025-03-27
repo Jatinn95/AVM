@@ -8,30 +8,25 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "3.1.56"
+      EMSDK_VERSION: "3.1.62"  # Updated to latest stable as of March 2025
       ARTIFACT_RETENTION_DAYS: 7
-      PYTHON_VERSION: "2.7.18"
+      PYTHON_VERSION: "3.11"   # Modern Python, QEMU supports Python 3 since 4.0
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Set Up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Install Build Dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
-            wget libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev xz-utils tk-dev
-
-      - name: Install Python 2.7 from Source
-        timeout-minutes: 20
-        run: |
-          wget -q https://www.python.org/ftp/python/${{ env.PYTHON_VERSION }}/Python-${{ env.PYTHON_VERSION }}.tgz
-          tar -xzf Python-${{ env.PYTHON_VERSION }}.tgz
-          cd Python-${{ env.PYTHON_VERSION }}
-          ./configure --enable-optimizations --quiet
-          make -j$(nproc)
-          sudo make altinstall
-          sudo ln -sf /usr/local/bin/python2.7 /usr/bin/python2.7
+          sudo apt-get install -y -qq \
+            build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build \
+            zlib1g-dev libfdt-dev libcap-dev libattr1-dev wget libssl-dev
 
       - name: Install Emscripten
         timeout-minutes: 20
@@ -45,37 +40,28 @@ jobs:
 
       - name: Fetch QEMU Source
         run: |
-          git clone --depth 1 https://github.com/atrosinenko/qemujs-builder.git
-          cd qemujs-builder
-          git submodule update --init --depth 1 qemu
+          git clone --depth 1 https://github.com/qemu/qemu.git
           cd qemu
-          git checkout 62e5ad0178b6cee9a81cf16e939675855e85a68b
+          git checkout v8.2.2  # Use a stable, recent QEMU release (March 2025)
 
-      - name: Patch QEMU Source
+      - name: Patch QEMU Source for Emscripten
         run: |
-          cd qemujs-builder/qemu
-          
-          # Patch configure script to skip compiler bug checks
+          cd qemu
+          # Skip unnecessary compiler bug checks
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          
-          # Patch to force i386 architecture for Emscripten
-          sed -i '/if test "$cpu" = ""; then/a\    if test "$emscripten" = "yes"; then\n        cpu="i386"\n    fi' configure
-          
-          # Patch to handle Emscripten target
+          # Detect Emscripten environment
           sed -i '/check_define __EMSCRIPTEN__/a\if test "$?" = "0"; then\n    emscripten=yes\nelse\n    emscripten=no\nfi' configure
 
       - name: Create Compiler Wrappers
         run: |
-          cd qemujs-builder/qemu
-          
-          # emcc wrapper that filters out problematic flags
+          cd qemu
+          # emcc wrapper to filter problematic flags
           cat > emcc-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
           for arg in "$@"; do
-              # Filter out problematic flags
               case "$arg" in
-                  "-m64"|"-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits")
+                  "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits")
                       continue
                       ;;
                   *)
@@ -87,14 +73,14 @@ jobs:
           EOF
           chmod +x emcc-wrapper.sh
           echo "EMCC_WRAPPER=$(pwd)/emcc-wrapper.sh" >> $GITHUB_ENV
-          
-          # Similar wrapper for em++
+
+          # em++ wrapper
           cat > emxx-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
           for arg in "$@"; do
               case "$arg" in
-                  "-m64"|"-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits")
+                  "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits")
                       continue
                       ;;
                   *)
@@ -113,19 +99,21 @@ jobs:
           CC: "${{ env.EMCC_WRAPPER }}"
           CXX: "${{ env.EMXX_WRAPPER }}"
           LD: "${{ env.EMCC_WRAPPER }}"
+          TARGET_ARCH: ${{ matrix.target == 'i386-softmmu' && 'i386' || 'x86_64' }}
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          cd qemujs-builder/qemu
-          
-          # Convert target name if needed
-          TARGET=${{ matrix.target }}
-          if [[ "$TARGET" == *"-softmmu" ]]; then
-            TARGET="${TARGET}:softmmu"
+          cd qemu
+
+          # Adjust flags based on target architecture
+          if [ "$TARGET_ARCH" = "i386" ]; then
+            EXTRA_CFLAGS="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
+          else
+            EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           fi
-          
+
           emconfigure ./configure \
-            --python=/usr/bin/python2.7 \
-            --target-list="$TARGET" \
+            --python=python3 \
+            --target-list="${{ matrix.target }}" \
             --disable-xen \
             --disable-user \
             --disable-linux-user \
@@ -136,17 +124,16 @@ jobs:
             --cross-prefix="" \
             --cc="$CC" \
             --cxx="$CXX" \
-            --extra-cflags="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -D__linux__ -Wno-ignored-optimization-argument" \
+            --extra-cflags="$EXTRA_CFLAGS" \
             --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1 -s TOTAL_MEMORY=256MB -s FORCE_FILESYSTEM=1" \
             --disable-pie \
             --disable-werror \
             --disable-stack-protector \
-            --disable-system \
             --disable-docs || {
-            echo "Configure failed! Dumping config.log for debugging:"
-            cat config.log
-            exit 1
-          }
+              echo "Configure failed! Dumping config.log:"
+              cat config.log
+              exit 1
+            }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
 
       - name: Build QEMU WebAssembly
@@ -154,15 +141,14 @@ jobs:
         timeout-minutes: 30
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          cd qemujs-builder/qemu
-          
-          ARCH="${TARGET%-softmmu}"
-          ARCH="${ARCH%:softmmu}"
-          
-          emmake make -j2 V=1 qemu-system-$ARCH \
+          cd qemu
+          ARCH="${{ matrix.target }}"
+          ARCH="${ARCH%-softmmu}"
+
+          emmake make -j$(nproc) V=1 qemu-system-$ARCH \
             CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
-          
+
           if [ ! -f "${{ matrix.target }}/qemu-system-$ARCH.wasm" ]; then
             echo "Error: .wasm file not generated!"
             ls -lh "${{ matrix.target }}"
@@ -174,10 +160,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-${{ matrix.target }}
-          path: qemujs-builder/qemu/${{ matrix.target }}/qemu-system-*.wasm
+          path: qemu/${{ matrix.target }}/qemu-system-*.wasm
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
         if: always()
         run: |
-          rm -rf qemujs-builder emsdk Python-${{ env.PYTHON_VERSION }} Python-${{ env.PYTHON_VERSION }}.tgz
+          rm -rf qemu emsdk
