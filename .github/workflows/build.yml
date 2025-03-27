@@ -171,6 +171,14 @@ jobs:
             echo "Error: Failed to patch gio/meson.build for Emscripten!"
             exit 1
           fi
+          echo "Patching gcompletion.c for Emscripten..."
+          sed -i 's/gcomp->strncmp_func = strncmp/gcomp->strncmp_func = (GCompletionStrncmpFunc)strncmp/' glib/deprecated/gcompletion.c
+          echo "Patched gcompletion.c snippet:"
+          grep -A 5 "gcomp->strncmp_func" glib/deprecated/gcompletion.c
+          if ! grep -q "(GCompletionStrncmpFunc)strncmp" glib/deprecated/gcompletion.c; then
+            echo "Error: Failed to patch gcompletion.c for Emscripten!"
+            exit 1
+          fi
           echo "Setting up Meson for GLib..."
           meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --wrap-mode=nofallback -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false -Dxattr=false
           meson compile -C build
