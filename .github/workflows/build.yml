@@ -75,7 +75,7 @@ jobs:
           wget https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz
           tar -xzf libffi-3.4.6.tar.gz
           cd libffi-3.4.6
-          sed -i '1i#include <stdlib.h>\n#ifdef __EMSCRIPTEN__\nvoid *tramp_table_alloc(void) { return NULL; }\nvoid ffi_tramp_lock(void) {}\nvoid ffi_tramp_unlock(void) {}\n#endif' src/tramp.c
+          sed -i '1i#include <stdlib.h>\n#ifdef __EMSCRIPTEN__\nvoid *tramp_table_alloc(void) { return NULL; }\nvoid ffi_tramp_lock(void) {}\nvoid ffi_tramp_unlock(void) {}\nbool tramp_table_map(void *table) { return false; }\nvoid tramp_table_unmap(void *table) {}\n#endif' src/tramp.c
           echo "Patched tramp.c snippet:"
           head -n 10 src/tramp.c
           if ! grep -q "stdlib.h" src/tramp.c; then
@@ -92,6 +92,14 @@ jobs:
           fi
           if ! grep -q "ffi_tramp_unlock" src/tramp.c; then
             echo "Error: Failed to stub ffi_tramp_unlock in tramp.c!"
+            exit 1
+          fi
+          if ! grep -q "tramp_table_map" src/tramp.c; then
+            echo "Error: Failed to stub tramp_table_map in tramp.c!"
+            exit 1
+          fi
+          if ! grep -q "tramp_table_unmap" src/tramp.c; then
+            echo "Error: Failed to stub tramp_table_unmap in tramp.c!"
             exit 1
           fi
           emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-builddir --disable-multi-os-directory --disable-shared --enable-static
@@ -156,7 +164,7 @@ jobs:
           cat > emcc-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
-          for arg in "$@ Eureka"; do
+          for arg in "$@"; do
               case "$arg" in
                   "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits"|"-m64"|"-mcx16")
                       continue
