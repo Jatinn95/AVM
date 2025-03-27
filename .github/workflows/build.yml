@@ -60,21 +60,26 @@ jobs:
           cd qemu
           # Skip compiler bug checks
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          # Force host OS to linux and disable bogus_os before OS check
+          # Force host OS to linux and disable bogus_os
           sed -i '/uname -s/i\# Force host OS for Emscripten on Linux\nhost_os=linux\nbogus_os=no\necho "DEBUG pre-uname: host_os=$host_os, bogus_os=$bogus_os"' configure
           # Debug after compiler setup
           sed -i '/cc="$cross_cc"/a\echo "DEBUG post-cc: host_os=$host_os, bogus_os=$bogus_os"' configure
-          # Replace all unrecognized OS errors with bypass
+          # Bypass unrecognized OS error
           sed -i 's/error_exit "Unrecognized host OS \(.*\)"/if [ "$host_os" = "linux" ]; then echo "DEBUG: Bypassing unrecognized OS error for linux"; else echo "DEBUG: Unrecognized host OS ($1)"; error_exit "Unrecognized host OS ($1)"; fi/' configure
-          # Verify patch applied
+          # Bypass Meson compiler version check for Emscripten
+          sed -i '/error.*You either need GCC v7.4/i\if cc.has_header("emscripten.h")\n  message("Emscripten detected, skipping version check")\nelse' meson.build
+          sed -i '/error.*You either need GCC v7.4/a\endif' meson.build
+          # Verify patches
           echo "Patched configure snippet:"
           head -n 100 configure
+          echo "Patched meson.build snippet:"
+          grep -A 10 "You either need GCC" meson.build
           if ! grep -q "host_os=linux" configure; then
             echo "Error: Patch failed to apply host_os=linux!"
             exit 1
           fi
-          if ! grep -q "bogus_os=no" configure; then
-            echo "Error: Patch failed to apply bogus_os=no!"
+          if ! grep -q "emscripten.h" meson.build; then
+            echo "Error: Patch failed to apply Meson Emscripten check!"
             exit 1
           fi
 
@@ -127,13 +132,14 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-
+          echo "DEBUG: CC=$CC, CXX=$CXX"
           if [ "$TARGET_ARCH" = "i386" ]; then
             EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           else
             EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           fi
-
+          export CC="${{ env.EMCC_WRAPPER }}"
+          export CXX="${{ env.EMXX_WRAPPER }}"
           emconfigure ./configure \
             --python=python3 \
             --target-list="${{ matrix.target }}" \
@@ -168,14 +174,12 @@ jobs:
           cd qemu
           ARCH="${{ matrix.target }}"
           ARCH="${ARCH%-softmmu}"
-
           emmake make -j$(nproc) V=1 qemu-system-$ARCH \
             CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
             LDFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1" || {
               echo "Build failed!"
               exit 1
             }
-
           if [ ! -f "${{ matrix.target }}/qemu-system-$ARCH.wasm" ]; then
             echo "Error: .wasm file not generated!"
             ls -lh "${{ matrix.target }}"
