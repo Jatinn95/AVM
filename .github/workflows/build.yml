@@ -8,10 +8,10 @@ jobs:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     env:
-      EMSDK_VERSION: "3.1.62"  # Latest stable Emscripten as of March 2025
+      EMSDK_VERSION: "3.1.62"
       ARTIFACT_RETENTION_DAYS: 7
-      PYTHON_VERSION: "3.11"   # Modern Python, QEMU supports it since v4.0
-      QEMU_VERSION: "v9.0.0"   # Latest stable QEMU release as of March 2025
+      PYTHON_VERSION: "3.11"
+      QEMU_VERSION: "v9.0.0"
 
     steps:
       - name: Checkout Repository
@@ -38,7 +38,6 @@ jobs:
           ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
-          # Verify Emscripten setup
           emcc --version || { echo "Emscripten setup failed"; exit 1; }
 
       - name: Fetch QEMU Source
@@ -54,23 +53,24 @@ jobs:
             }
           }
           cd qemu
-          git log -1  # Show commit details for debugging
+          git log -1
 
       - name: Patch QEMU Source for Emscripten
         run: |
           cd qemu
           # Skip compiler bug checks
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          # Force host OS to linux and disable bogus_os for Emscripten
-          sed -i '/#!\/bin\/sh/a\if echo | "${{ env.EMSDK_PATH }}/upstream/emscripten/emcc" -dM -E - | grep -q __EMSCRIPTEN__; then\n    emscripten=yes\n    host_os=linux\n    bogus_os=no\nelse\n    emscripten=no\nfi' configure
-          # Debug: Verify patch
+          # Force host OS to linux for Emscripten builds on Ubuntu
+          sed -i '/#!\/bin\/sh/a\# Force host OS for Emscripten on Linux\nhost_os=linux\nbogus_os=no' configure
+          # Add debug output before OS error check
+          sed -i '/error_exit "Unrecognized host OS"/i\echo "DEBUG: host_os=$host_os, bogus_os=$bogus_os"' configure
+          # Debug: Show patched section
           echo "Patched configure snippet:"
           head -n 20 configure
 
       - name: Create Compiler Wrappers
         run: |
           cd qemu
-          # emcc wrapper to filter problematic flags
           cat > emcc-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
@@ -89,7 +89,6 @@ jobs:
           chmod +x emcc-wrapper.sh
           echo "EMCC_WRAPPER=$(pwd)/emcc-wrapper.sh" >> $GITHUB_ENV
 
-          # em++ wrapper
           cat > emxx-wrapper.sh << 'EOF'
           #!/bin/bash
           args=()
@@ -119,7 +118,6 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
 
-          # Set architecture-specific flags
           if [ "$TARGET_ARCH" = "i386" ]; then
             EXTRA_CFLAGS="-m32 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
           else
