@@ -74,11 +74,13 @@ jobs:
           emmake make install
           cd ..
 
-          # Install libffi
+          # Install libffi with patch
           wget https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz
           tar -xzf libffi-3.4.6.tar.gz
           cd libffi-3.4.6
-          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-builddir --disable-multi-os-directory
+          sed -i '/#include <ffi.h>/a#include <stdlib.h>' src/tramp.c
+          sed -i 's/tramp_table_map/tramp_table_alloc/' src/tramp.c
+          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-builddir --disable-multi-os-directory --disable-shared --enable-static
           emmake make -j$(nproc)
           emmake make install
           cd ..
