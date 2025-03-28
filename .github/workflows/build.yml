@@ -198,8 +198,7 @@ jobs:
           meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" \
             --wrap-mode=nofallback -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false -Dxattr=false \
             -Dc_args='-Wno-error -Wno-cast-function-type-mismatch -Wno-unused-parameter -Wno-incompatible-function-pointer-types -Wno-format -Wno-pedantic' \
-            -Dc_link_args='-s USE_PTHREADS=0 -s EXPORTED_FUNCTIONS=["_main"]' \
-            -Dinternal_pcre=false
+            -Dc_link_args='-s USE_PTHREADS=0 -s EXPORTED_FUNCTIONS=["_main"]'
           echo "Compiling GLib with stubs..."
           meson compile -C build
           ninja -C build gio/libgio-2.0.a glib/libglib-2.0.a gobject/libgobject-2.0.a gmodule/libgmodule-2.0.a
