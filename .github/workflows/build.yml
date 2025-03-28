@@ -118,7 +118,7 @@ jobs:
             echo "Error: Failed to stub ffi_tramp_init_os in tramp.c!"
             exit 1
           fi
-          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-builddir --disable-multi-os-directory --disable-shared --enable-static CFLAGS="-s USE_PTHREADS=0"
+          emconfigure ./configure --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" --disable-builddir --disable-multi-os-directory --disable-shared --enable-static CFLAGS="-s USE_PTHREADS=0 -s EXPORT_ALL=1"
           emmake make -j$(nproc)
           emmake make install
           if [ ! -f "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/libffi.pc" ]; then
@@ -193,22 +193,23 @@ jobs:
               return -1;
           }
           EOF
-          emcc -c emscripten-stubs.c -o emscripten-stubs.o
           echo "Setting up Meson for GLib..."
           meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" \
             --wrap-mode=nofallback -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false -Dxattr=false \
             -Dc_args='-Wno-error -Wno-cast-function-type-mismatch -Wno-unused-parameter -Wno-incompatible-function-pointer-types -Wno-format -Wno-pedantic' \
-            -Dc_link_args='-s USE_PTHREADS=0 -s EXPORTED_FUNCTIONS=["_main"]'
-          echo "Compiling GLib with stubs..."
+            -Dc_link_args='-s USE_PTHREADS=0 -s EXPORTED_FUNCTIONS=["_main"] -s EXPORT_ALL=1'
+          echo "Copying stubs into source directory..."
+          cp emscripten-stubs.c glib/
+          echo "Patching meson.build to include stubs..."
+          sed -i "/glib_sources = files(/a\  'emscripten-stubs.c'," glib/meson.build
+          echo "Patched glib/meson.build snippet:"
+          grep -A 10 "glib_sources = files(" glib/meson.build
+          if ! grep -q "emscripten-stubs.c" glib/meson.build; then
+            echo "Error: Failed to patch glib/meson.build with stubs!"
+            exit 1
+          fi
+          echo "Compiling and installing GLib..."
           meson compile -C build
-          ninja -C build gio/libgio-2.0.a glib/libglib-2.0.a gobject/libgobject-2.0.a gmodule/libgmodule-2.0.a
-          echo "Manually linking libraries with stubs..."
-          emcc -r -o glib-combined.o build/gio/libgio-2.0.a build/glib/libglib-2.0.a build/gobject/libgobject-2.0.a build/gmodule/libgmodule-2.0.a emscripten-stubs.o \
-            "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/libz.a" \
-            "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/libpcre2-8.a" \
-            "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/libffi.a" \
-            -s USE_PTHREADS=0
-          echo "Installing GLib..."
           meson install -C build
           if [ ! -f "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" ]; then
             echo "Error: glib-2.0.pc not installed!"
