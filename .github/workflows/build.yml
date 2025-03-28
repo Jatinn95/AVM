@@ -182,7 +182,8 @@ jobs:
           echo "Setting up Meson for GLib..."
           meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot" \
             --wrap-mode=nofallback -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false -Dxattr=false \
-            -Dc_args='-Wno-error -Wno-cast-function-type-mismatch -Wno-unused-parameter -Wno-incompatible-function-pointer-types -Wno-format -Wno-pedantic'
+            -Dc_args='-Wno-error -Wno-cast-function-type-mismatch -Wno-unused-parameter -Wno-incompatible-function-pointer-types -Wno-format -Wno-pedantic' \
+            -Dc_link_args='-s USE_PTHREADS=0 -s EXPORTED_FUNCTIONS=["_main"]'
           meson compile -C build
           meson install -C build
           if [ ! -f "${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig/glib-2.0.pc" ]; then
