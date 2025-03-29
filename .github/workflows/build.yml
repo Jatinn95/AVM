@@ -201,9 +201,9 @@ jobs:
           echo "Copying stubs into source directory..."
           cp emscripten-stubs.c glib/
           echo "Patching meson.build to include stubs..."
-          sed -i "/^[[:space:]]*glib_sources[[:space:]]*=[[:space:]]*files(/a\  'emscripten-stubs.c'," glib/meson.build
+          sed -i "/^[[:space:]]*glib_sources[[:space:]]*=[[:space:]]*\\[\\]/a\glib_sources += ['emscripten-stubs.c']" glib/meson.build
           echo "Patched glib/meson.build snippet:"
-          grep -A 10 "glib_sources[[:space:]]*=[[:space:]]*files(" glib/meson.build || echo "Pattern not found, dumping first 20 lines of glib/meson.build:"; head -n 20 glib/meson.build
+          grep -A 10 "glib_sources[[:space:]]*=[[:space:]]*\\[" glib/meson.build || { echo "Pattern not found, dumping first 20 lines of glib/meson.build:"; head -n 20 glib/meson.build; }
           if ! grep -q "emscripten-stubs.c" glib/meson.build; then
             echo "Error: Failed to patch glib/meson.build with stubs!"
             exit 1
