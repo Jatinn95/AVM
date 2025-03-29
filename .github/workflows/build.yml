@@ -179,18 +179,34 @@ jobs:
             echo "Error: Failed to patch gcompletion.c for Emscripten!"
             exit 1
           fi
-          echo "Adding stubs for missing POSIX functions..."
+          echo "Adding stubs for missing POSIX and libffi functions..."
           cat > emscripten-stubs.c << 'EOF'
           #include <sys/types.h>
           #include <unistd.h>
           #include <errno.h>
+          #include <ffi.h>
+
           int res_query(const char *dname, int class, int type, unsigned char *answer, int anslen) {
               errno = ENOSYS;
               return -1;
           }
+
           int posix_spawnp(pid_t *pid, const char *file, const void *file_actions, const void *attrp, char *const argv[], char *const envp[]) {
               errno = ENOSYS;
               return -1;
+          }
+
+          /* Stubs for libffi functions missing in Emscripten */
+          void ffi_call(ffi_cif *cif, void (*fn)(void), void *rvalue, void **avalues) {
+              /* Minimal stub: do nothing or set an error */
+              if (rvalue) {
+                  *(int *)rvalue = 0; /* Return 0 or some default value */
+              }
+          }
+
+          ffi_status ffi_prep_cif_machdep(ffi_cif *cif) {
+              /* Minimal stub: assume success */
+              return FFI_OK;
           }
           EOF
           echo "Setting up Meson for GLib..."
