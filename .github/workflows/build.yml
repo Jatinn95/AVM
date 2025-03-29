@@ -272,26 +272,23 @@ jobs:
             exit 1
           fi
 
-      - name: Patch QEMU memfd.c for Emscripten
+      - name: Patch QEMU memfd.c and oslib-posix.c for Emscripten
         run: |
           cd qemu
           echo "Patching util/memfd.c for Emscripten..."
-          # Remove the existing memfd_create block and replace it
+          sed -i '1i#include <errno.h>' util/memfd.c
           sed -i '/#ifdef CONFIG_MEMFD/,/#endif/d' util/memfd.c
           sed -i '/#include <sys\/memfd.h>/a\
-          \n#ifdef __EMSCRIPTEN__\
-          \nint memfd_create(const char *name, unsigned int flags)\
-          \n{\
-          \n    errno = ENOSYS;\
-          \n    return -1;\
-          \n}\
-          \n#else\
-          \nint memfd_create(const char *name, unsigned int flags)\
-          \n{\
-          \n    return syscall(__NR_memfd_create, name, flags);\
-          \n}\
-          \n#endif' util/memfd.c
-          sed -i '1i#include <errno.h>' util/memfd.c
+          #ifdef __EMSCRIPTEN__\
+          int memfd_create(const char *name, unsigned int flags) {\
+              errno = ENOSYS;\
+              return -1;\
+          }\
+          #else\
+          int memfd_create(const char *name, unsigned int flags) {\
+              return syscall(__NR_memfd_create, name, flags);\
+          }\
+          #endif' util/memfd.c
           echo "Patched util/memfd.c snippet (start):"
           head -n 20 util/memfd.c
           echo "Patched util/memfd.c snippet (end):"
@@ -306,6 +303,15 @@ jobs:
           fi
           if ! grep -q "#endif" util/memfd.c; then
             echo "Error: Failed to close Emscripten conditional in memfd.c!"
+            exit 1
+          fi
+
+          echo "Patching util/oslib-posix.c for Emscripten..."
+          sed -i 's/size_t len;/gsize len;/' util/oslib-posix.c
+          echo "Patched util/oslib-posix.c snippet:"
+          grep -A 5 "g_file_get_contents" util/oslib-posix.c
+          if ! grep -q "gsize len;" util/oslib-posix.c; then
+            echo "Error: Failed to patch oslib-posix.c with gsize!"
             exit 1
           fi
 
