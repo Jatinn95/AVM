@@ -272,6 +272,22 @@ jobs:
             exit 1
           fi
 
+      - name: Patch QEMU memfd.c for Emscripten
+        run: |
+          cd qemu
+          echo "Patching util/memfd.c for Emscripten..."
+          sed -i '1i#include <errno.h>' util/memfd.c
+          sed -i '/#include <sys\/mman.h>/a#ifdef __EMSCRIPTEN__\nint memfd_create(const char *name, unsigned int flags) {\n    errno = ENOSYS;\n    return -1;\n}\n#else' util/memfd.c
+          sed -i '$a#endif' util/memfd.c
+          echo "Patched util/memfd.c snippet (start):"
+          head -n 10 util/memfd.c
+          echo "Patched util/memfd.c snippet (end):"
+          tail -n 10 util/memfd.c
+          if ! grep -q "errno = ENOSYS" util/memfd.c; then
+            echo "Error: Failed to patch memfd.c with Emscripten stub!"
+            exit 1
+          fi
+
       - name: Create Compiler Wrappers
         run: |
           cd qemu
