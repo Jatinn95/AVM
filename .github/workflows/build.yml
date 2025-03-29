@@ -358,19 +358,21 @@ jobs:
       - name: Create Stub Linux Headers for Emscripten
         run: |
           cd qemu
-          mkdir -p stubs
-          cat > stubs/linux/magic.h << 'EOF'
-          #ifndef _LINUX_MAGIC_H
-          #define _LINUX_MAGIC_H
-
-          /* Minimal stub for linux/magic.h required by QEMU */
-          #define TMPFS_MAGIC     0x01021994
-          #define RAMFS_MAGIC     0x858458f6
-          #define EXT4_SUPER_MAGIC 0xEF53
-
-          #endif /* _LINUX_MAGIC_H */
-          EOF
+          mkdir -p stubs/linux
+          echo "#ifndef _LINUX_MAGIC_H" > stubs/linux/magic.h
+          echo "#define _LINUX_MAGIC_H" >> stubs/linux/magic.h
+          echo "" >> stubs/linux/magic.h
+          echo "/* Minimal stub for linux/magic.h required by QEMU */" >> stubs/linux/magic.h
+          echo "#define TMPFS_MAGIC     0x01021994" >> stubs/linux/magic.h
+          echo "#define RAMFS_MAGIC     0x858458f6" >> stubs/linux/magic.h
+          echo "#define EXT4_SUPER_MAGIC 0xEF53" >> stubs/linux/magic.h
+          echo "" >> stubs/linux/magic.h
+          echo "#endif /* _LINUX_MAGIC_H */" >> stubs/linux/magic.h
           echo "Stub linux/magic.h created with basic filesystem magic numbers."
+          if [ ! -f stubs/linux/magic.h ]; then
+            echo "Error: Failed to create stubs/linux/magic.h!"
+            exit 1
+          fi
 
       - name: Build QEMU WebAssembly
         if: env.CONFIGURE_SUCCEEDED == 'true'
