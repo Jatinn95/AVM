@@ -51,7 +51,7 @@ jobs:
           sudo apt-get install -y -qq \
             build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev \
             ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
-            wget libssl-dev pkg-config git tar xz-utils meson
+            wget libssl-dev pkg-config git tar x aventura-utils meson
 
       - name: Install Python Dependencies
         run: |
@@ -227,7 +227,9 @@ jobs:
           }\
           #endif' util/memfd.c
           
+          # Fix type consistency - use gsize consistently
           sed -i 's/size_t len;/gsize len;/' util/oslib-posix.c
+          sed -i 's/size_t \*len/gsize *len/' util/oslib-posix.c
 
       - name: Create Stub Headers
         run: |
@@ -324,7 +326,7 @@ jobs:
           ARCH="${ARCH%-softmmu}"
           
           emmake make -j$(nproc) V=1 qemu-system-$ARCH \
-            CFLAGS="$CFLAGS" \
+            CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -I$STUBS_DIR" \
             LDFLAGS="$LDFLAGS" || {
               echo "Build failed!"
               exit 1
