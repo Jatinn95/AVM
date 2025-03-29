@@ -276,13 +276,26 @@ jobs:
         run: |
           cd qemu
           echo "Patching util/memfd.c for Emscripten..."
+          # Remove the existing memfd_create block and replace it
+          sed -i '/#ifdef CONFIG_MEMFD/,/#endif/d' util/memfd.c
+          sed -i '/#include <sys\/memfd.h>/a\
+          \n#ifdef __EMSCRIPTEN__\
+          \nint memfd_create(const char *name, unsigned int flags)\
+          \n{\
+          \n    errno = ENOSYS;\
+          \n    return -1;\
+          \n}\
+          \n#else\
+          \nint memfd_create(const char *name, unsigned int flags)\
+          \n{\
+          \n    return syscall(__NR_memfd_create, name, flags);\
+          \n}\
+          \n#endif' util/memfd.c
           sed -i '1i#include <errno.h>' util/memfd.c
-          sed -i '/int memfd_create(const char \*name, unsigned int flags)/i#ifdef __EMSCRIPTEN__\nint memfd_create(const char *name, unsigned int flags) {\n    errno = ENOSYS;\n    return -1;\n}\n#else' util/memfd.c
-          sed -i '/return syscall(__NR_memfd_create, name, flags);/a#endif' util/memfd.c
           echo "Patched util/memfd.c snippet (start):"
-          head -n 15 util/memfd.c
+          head -n 20 util/memfd.c
           echo "Patched util/memfd.c snippet (end):"
-          tail -n 15 util/memfd.c
+          tail -n 20 util/memfd.c
           if ! grep -q "errno = ENOSYS" util/memfd.c; then
             echo "Error: Failed to patch memfd.c with Emscripten stub!"
             exit 1
