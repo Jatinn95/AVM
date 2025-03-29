@@ -355,6 +355,23 @@ jobs:
             }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
 
+      - name: Create Stub Linux Headers for Emscripten
+        run: |
+          cd qemu
+          mkdir -p stubs
+          cat > stubs/linux/magic.h << 'EOF'
+          #ifndef _LINUX_MAGIC_H
+          #define _LINUX_MAGIC_H
+
+          /* Minimal stub for linux/magic.h required by QEMU */
+          #define TMPFS_MAGIC     0x01021994
+          #define RAMFS_MAGIC     0x858458f6
+          #define EXT4_SUPER_MAGIC 0xEF53
+
+          #endif /* _LINUX_MAGIC_H */
+          EOF
+          echo "Stub linux/magic.h created with basic filesystem magic numbers."
+
       - name: Build QEMU WebAssembly
         if: env.CONFIGURE_SUCCEEDED == 'true'
         timeout-minutes: 30
@@ -364,7 +381,7 @@ jobs:
           ARCH="${{ matrix.target }}"
           ARCH="${ARCH%-softmmu}"
           emmake make -j$(nproc) V=1 qemu-system-$ARCH \
-            CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__" \
+            CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -I$(pwd)/stubs" \
             LDFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1" || {
               echo "Build failed!"
               exit 1
