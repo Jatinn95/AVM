@@ -277,14 +277,22 @@ jobs:
           cd qemu
           echo "Patching util/memfd.c for Emscripten..."
           sed -i '1i#include <errno.h>' util/memfd.c
-          sed -i '/#include <sys\/mman.h>/a#ifdef __EMSCRIPTEN__\nint memfd_create(const char *name, unsigned int flags) {\n    errno = ENOSYS;\n    return -1;\n}\n#else' util/memfd.c
-          sed -i '$a#endif' util/memfd.c
+          sed -i '/int memfd_create(const char \*name, unsigned int flags)/i#ifdef __EMSCRIPTEN__\nint memfd_create(const char *name, unsigned int flags) {\n    errno = ENOSYS;\n    return -1;\n}\n#else' util/memfd.c
+          sed -i '/return syscall(__NR_memfd_create, name, flags);/a#endif' util/memfd.c
           echo "Patched util/memfd.c snippet (start):"
-          head -n 10 util/memfd.c
+          head -n 15 util/memfd.c
           echo "Patched util/memfd.c snippet (end):"
-          tail -n 10 util/memfd.c
+          tail -n 15 util/memfd.c
           if ! grep -q "errno = ENOSYS" util/memfd.c; then
             echo "Error: Failed to patch memfd.c with Emscripten stub!"
+            exit 1
+          fi
+          if ! grep -q "#ifdef __EMSCRIPTEN__" util/memfd.c; then
+            echo "Error: Failed to add Emscripten conditional to memfd.c!"
+            exit 1
+          fi
+          if ! grep -q "#endif" util/memfd.c; then
+            echo "Error: Failed to close Emscripten conditional in memfd.c!"
             exit 1
           fi
 
