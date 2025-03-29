@@ -323,9 +323,9 @@ jobs:
           cd qemu
           echo "DEBUG: CC=$CC, CXX=$CXX"
           if [ "$TARGET_ARCH" = "i386" ]; then
-            EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
+            EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument -I/home/runner/work/AVM/AVM/qemu/stubs"
           else
-            EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument"
+            EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument -I/home/runner/work/AVM/AVM/qemu/stubs"
           fi
           export CC="${{ env.EMCC_WRAPPER }}"
           export CXX="${{ env.EMXX_WRAPPER }}"
