@@ -383,7 +383,7 @@ jobs:
           ARCH="${{ matrix.target }}"
           ARCH="${ARCH%-softmmu}"
           emmake make -j$(nproc) V=1 qemu-system-$ARCH \
-            CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -I$(pwd)/stubs" \
+            CFLAGS="-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -I/home/runner/work/AVM/AVM/qemu/stubs" \
             LDFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1" || {
               echo "Build failed!"
               exit 1
