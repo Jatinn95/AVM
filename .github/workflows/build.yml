@@ -19,6 +19,9 @@ jobs:
   build-wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    container:
+      image: ubuntu:22.04
+      options: --memory 8G --cpu 2
 
     strategy:
       matrix:
@@ -44,8 +47,8 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          apt-get update -qq
+          apt-get install -y -qq \
             build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev \
             ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
             wget libssl-dev pkg-config git tar xz-utils meson
@@ -294,7 +297,7 @@ jobs:
           source "$EMSDK_PATH/emsdk_env.sh"
           cd qemu
           
-          EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument -I$STUBS_DIR"
+          EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument -I${{ env.STUBS_DIR }}"
           
           emconfigure ./configure \
             --python=python3 \
