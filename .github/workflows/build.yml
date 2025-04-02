@@ -19,22 +19,13 @@ jobs:
   build-wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 75
-    container:
-      image: ubuntu:22.04
-      options: --memory 6G --cpu 2  # Adjusted from 8G to 6G
+    # No container section
 
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
     
     steps:
-      - name: Debug Environment
-        run: |
-          docker --version
-          docker info
-          free -h
-          nproc
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -167,7 +158,7 @@ jobs:
               return -1;
           }
 
-          int posix_spawnp(pid_t *pid, const char *file, const void *file_actions, const void *attrp, char *const argv[], char *const envp[]) {
+          int posix_spawnp(pid_t *pid, const char *file, const void *file_actions Six, const void *attrp, char *const argv[], char *const envp[]) {
               errno = ENOSYS;
               return -1;
           }
