@@ -116,7 +116,7 @@ jobs:
             
             [ -n "$patches" ] && eval "$patches"
             
-            emconfigure ./configure --prefix=$EMSCRIPTEN/cache/sysroot $configure_args
+            emconfigure ./configure --prefix="$EMSCRIPTEN/cache/sysroot" $configure_args
             emmake make -j$(nproc) CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" libz.a
             emmake make install
             cd ..
