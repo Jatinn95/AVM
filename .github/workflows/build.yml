@@ -8,20 +8,17 @@ env:
   PYTHON_VERSION: "3.11"
   QEMU_VERSION: "v9.0.0"
   BUILD_DIR: "${{ github.workspace }}/build"
-  STUBS_DIR: "${{ github.workflow }}/stubs"
+  STUBS_DIR: "${{ github.workspace }}/stubs"
   LIBS_DIR: "${{ github.workspace }}/emscripten-libs"
   TOTAL_MEMORY: "512MB"  # Increased from 256MB
   OPTIMIZATION_FLAGS: "-O3 -flto"
-  CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__"  # Removed -I$STUBS_DIR from here
+  CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__"  # Base flags without STUBS_DIR
   LDFLAGS: "-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -O3 -flto"
 
 jobs:
   build-wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 75
-    container:
-      image: ubuntu:22.04
-      options: --memory 8G --cpu 2
 
     strategy:
       matrix:
@@ -47,8 +44,8 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          apt-get update -qq
-          apt-get install -y -qq \
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
             build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev \
             ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
             wget libssl-dev pkg-config git tar xz-utils meson
