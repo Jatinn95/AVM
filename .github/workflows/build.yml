@@ -8,11 +8,11 @@ env:
   PYTHON_VERSION: "3.11"
   QEMU_VERSION: "v9.0.0"
   BUILD_DIR: "${{ github.workspace }}/build"
-  STUBS_DIR: "${{ github.workspace }}/stubs"
+  STUBS_DIR: "${{ github.workflow }}/stubs"
   LIBS_DIR: "${{ github.workspace }}/emscripten-libs"
   TOTAL_MEMORY: "512MB"  # Increased from 256MB
   OPTIMIZATION_FLAGS: "-O3 -flto"
-  CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -I${{ env.STUBS_DIR }}"
+  CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__"  # Removed -I$STUBS_DIR from here
   LDFLAGS: "-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -O3 -flto"
 
 jobs:
@@ -297,7 +297,7 @@ jobs:
           source "$EMSDK_PATH/emsdk_env.sh"
           cd qemu
           
-          EXTRA_CFLAGS="-DNO_FUTEX=1 -D__EMSCRIPTEN__ -Wno-ignored-optimization-argument -I${{ env.STUBS_DIR }}"
+          EXTRA_CFLAGS="$CFLAGS -Wno-ignored-optimization-argument -I${{ env.STUBS_DIR }}"
           
           emconfigure ./configure \
             --python=python3 \
@@ -335,7 +335,7 @@ jobs:
           ARCH="${ARCH%-softmmu}"
           
           emmake make -j$(nproc) V=1 qemu-system-$ARCH \
-            CFLAGS="$CFLAGS" \
+            CFLAGS="$CFLAGS -I${{ env.STUBS_DIR }}" \
             LDFLAGS="$LDFLAGS" || {
               echo "Build failed!"
               exit 1
