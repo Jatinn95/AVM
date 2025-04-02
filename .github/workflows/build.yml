@@ -28,6 +28,13 @@ jobs:
         target: ["i386-softmmu", "x86_64-softmmu"]
     
     steps:
+      - name: Debug Environment
+        run: |
+          docker --version
+          docker info
+          free -h
+          nproc
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -51,7 +58,7 @@ jobs:
           sudo apt-get install -y -qq \
             build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev \
             ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
-            wget libssl-dev pkg-config git tar xventura-utils meson
+            wget libssl-dev pkg-config git tar xz-utils meson
 
       - name: Install Python Dependencies
         run: |
