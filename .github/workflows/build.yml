@@ -12,8 +12,8 @@ env:
   LIBS_DIR: "${{ github.workspace }}/emscripten-libs"
   TOTAL_MEMORY: "512MB"  # Increased from 256MB
   OPTIMIZATION_FLAGS: "-O3 -flto"
-  CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -I$STUBS_DIR"
-  LDFLAGS: "-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 $OPTIMIZATION_FLAGS"
+  CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__ -I${{ env.STUBS_DIR }}"
+  LDFLAGS: "-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -O3 -flto"
 
 jobs:
   build-wasm:
@@ -117,7 +117,7 @@ jobs:
             [ -n "$patches" ] && eval "$patches"
             
             emconfigure ./configure --prefix=$EMSCRIPTEN/cache/sysroot $configure_args
-            emmake make -j$(nproc) CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"
+            emmake make -j$(nproc) CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" libz.a
             emmake make install
             cd ..
           }
@@ -310,7 +310,7 @@ jobs:
             --cc="$CC" \
             --cxx="$CXX" \
             --extra-cflags="$EXTRA_CFLAGS" \
-            --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1 -s TOTAL_MEMORY=$TOTAL_MEMORY -s FORCE_FILESYSTEM=1 $OPTIMIZATION_FLAGS" \
+            --extra-ldflags="$LDFLAGS -s TOTAL_MEMORY=$TOTAL_MEMORY -s FORCE_FILESYSTEM=1" \
             --disable-werror \
             --disable-stack-protector \
             --disable-docs || {
