@@ -51,7 +51,7 @@ jobs:
           sudo apt-get install -y -qq \
             build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev \
             ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
-            wget libssl-dev pkg-config git tar x aventura-utils meson
+            wget libssl-dev pkg-config git tar xventura-utils meson
 
       - name: Install Python Dependencies
         run: |
@@ -216,20 +216,30 @@ jobs:
           sed -i "/appleframeworks_dep = dependency('appleframeworks'/i\if cc.has_header('emscripten.h')\n  appleframeworks_dep = declare_dependency()\nelse" meson.build
           sed -i "/appleframeworks_dep = dependency('appleframeworks'/a\endif" meson.build
           
-          # Memory management patches
-          sed -i '1i#include <errno.h>' util/memfd.c
-          sed -i '/#ifdef CONFIG_MEMFD/,/#endif/d' util/memfd.c
-          sed -i '/#include <sys\/memfd.h>/a\
-          #ifdef __EMSCRIPTEN__\
-          int memfd_create(const char *name, unsigned int flags) {\
-              errno = ENOSYS;\
-              return -1;\
-          }\
-          #endif' util/memfd.c
+          # Replace memfd.c with a clean version
+          cat > util/memfd.c << 'EOF'
+          #include <errno.h>
+          #include <sys/mman.h>
+          #include <string.h>
+          
+          #ifdef __EMSCRIPTEN__
+          int memfd_create(const char *name, unsigned int flags) {
+              errno = ENOSYS;
+              return -1;
+          }
+          #else
+          #error "memfd_create not supported on this platform without CONFIG_MEMFD"
+          #endif
+          EOF
           
           # Fix type consistency - use gsize consistently
           sed -i 's/size_t len;/gsize len;/' util/oslib-posix.c
           sed -i 's/size_t \*len/gsize *len/' util/oslib-posix.c
+
+      - name: Verify Patches
+        run: |
+          cd qemu
+          grep "gsize len" util/oslib-posix.c || echo "Patch for oslib-posix.c failed!"
 
       - name: Create Stub Headers
         run: |
@@ -304,7 +314,6 @@ jobs:
             --cxx="$CXX" \
             --extra-cflags="$EXTRA_CFLAGS" \
             --extra-ldflags="-s USE_PTHREADS=0 -s WASM=1 -s TOTAL_MEMORY=$TOTAL_MEMORY -s FORCE_FILESYSTEM=1 $OPTIMIZATION_FLAGS" \
-            --disable-pie \
             --disable-werror \
             --disable-stack-protector \
             --disable-docs || {
