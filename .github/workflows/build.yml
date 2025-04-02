@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 75
     container:
       image: ubuntu:22.04
-      options: --memory 8G --cpu 2
+      options: --memory 6G --cpu 2  # Adjusted from 8G to 6G
 
     strategy:
       matrix:
