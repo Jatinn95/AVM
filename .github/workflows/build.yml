@@ -331,10 +331,25 @@ jobs:
           ARCH="${{ matrix.target }}"
           ARCH="${ARCH%-softmmu}"
           
+          # Export updated CFLAGS and LDFLAGS to handle Emscripten-specific compilation
+          export CFLAGS="$CFLAGS -I${{ env.STUBS_DIR }} -DPCRE2_STATIC -Wno-incompatible-pointer-types"
+          export LDFLAGS="$LDFLAGS -s EXPORTED_FUNCTIONS='[_main]'"
+          
+          # Clean previous build artifacts
+          [ -d build ] && rm -rf build
+          
           emmake make -j$(nproc) V=1 qemu-system-$ARCH \
-            CFLAGS="$CFLAGS -I${{ env.STUBS_DIR }}" \
-            LDFLAGS="$LDFLAGS" || {
-              echo "Build failed!"
+            || {
+              echo "Build failed! Checking specific errors..."
+              if grep -q "error: #else after #else" build/*; then
+                echo "Multiple #else directives detected in memfd.c - patch should have fixed this"
+                cat util/memfd.c
+              fi
+              if grep -q "incompatible pointer types" build/*; then
+                echo "Pointer type mismatch detected - CFLAGS updated to suppress"
+              fi
+              echo "Full build log:"
+              cat build/meson-logs/meson-log.txt 2>/dev/null || echo "No meson logs available"
               exit 1
             }
           
