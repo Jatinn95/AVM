@@ -87,16 +87,15 @@ jobs:
         force-avd-creation: true
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off
         disable-animations: true
-        timeout-minutes: 15  # Increased timeout for stability
-      script: |
-        echo "Waiting for emulator to boot..."
-        adb wait-for-device
-        # Check if emulator booted successfully
-        if ! adb shell getprop sys.boot_completed | grep -q "1"; then
-          echo "Emulator failed to boot"
-          exit 1
-        fi
-        echo "Emulator booted successfully with API 30"
+        timeout-minutes: 15
+        script: |
+          echo "Waiting for emulator to boot..."
+          adb wait-for-device
+          if ! adb shell getprop sys.boot_completed | grep -q "1"; then
+            echo "Emulator failed to boot"
+            exit 1
+          fi
+          echo "Emulator booted successfully with API 30"
 
     - name: Push WebAssembly to Emulator
       run: |
