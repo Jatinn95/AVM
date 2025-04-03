@@ -1,9 +1,8 @@
-name: Build QEMU WASM for x86
+name: Build QEMU WASM for Android
 
 on: [push]
 
 env:
-  # Centralized environment variables for consistency and easy updates
   EMSDK_VERSION: "3.1.62"
   ARTIFACT_RETENTION_DAYS: 7
   PYTHON_VERSION: "3.11"
@@ -12,7 +11,6 @@ env:
   STUBS_DIR: "${{ github.workspace }}/stubs"
   LIBS_DIR: "${{ github.workspace }}/emscripten-libs"
   TOTAL_MEMORY: "512MB"
-  OPTIMIZATION_FLAGS: "-O3 -flto"
   BASE_CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__"
   BASE_LDFLAGS: "-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -O3 -flto"
 
@@ -21,16 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 75
 
-    strategy:
-      matrix:
-        target: ["i386-softmmu", "x86_64-softmmu"]
-      fail-fast: false  # Allow all targets to run even if one fails
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Cache system-level dependencies and pip cache
       - name: Cache Dependencies
         id: cache-deps
         uses: actions/cache@v3
@@ -41,20 +33,18 @@ jobs:
           key: ${{ runner.os }}-deps-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt') }}
           restore-keys: ${{ runner.os }}-deps-${{ env.PYTHON_VERSION }}-
 
-      # Set up Python with caching for pip dependencies
       - name: Set Up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"  # Caches based on requirements.txt
+          cache: "pip"
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             build-essential libsdl2-dev libglib2.0-dev libpixman-1-dev \
-            ninja-build zlib1g-dev libfdt-dev libcap-dev libattr1-dev \
-            wget libssl-dev pkg-config git tar xz-utils meson
+            ninja-build zlib1g-dev libfdt-dev wget pkg-config git tar xz-utils meson
 
       - name: Install Python Dependencies
         run: |
@@ -86,7 +76,6 @@ jobs:
           mkdir -p ${{ env.LIBS_DIR }}
           cd ${{ env.LIBS_DIR }}
 
-          # Cross-compilation configuration
           cat > emscripten-cross.txt << 'EOF'
           [binaries]
           c = '${{ env.EMSCRIPTEN }}/emcc'
@@ -105,14 +94,12 @@ jobs:
           endian = 'little'
           EOF
 
-          # Modular library build function
           build_lib() {
-            local url=$1 name=$2 version=$3 configure_args=$4 patches=$5
+            local url=$1 name=$2 version=$3 configure_args=$4
             echo "Building $name $version..."
             wget -q "$url" -O "${name}-${version}.tar.gz"
             tar -xzf "${name}-${version}.tar.gz"
             cd "${name}-${version}"
-            [ -n "$patches" ] && eval "$patches"
             emconfigure ./configure --prefix="${{ env.EMSCRIPTEN }}/cache/sysroot" $configure_args
             emmake make -j$(nproc) CFLAGS="${{ env.BASE_CFLAGS }}" LDFLAGS="${{ env.BASE_LDFLAGS }}" lib${name}.a
             emmake make install
@@ -120,35 +107,8 @@ jobs:
           }
 
           build_lib "https://zlib.net/zlib-1.3.1.tar.gz" "zlib" "1.3.1" "--static"
-          build_lib "https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz" "libffi" "3.4.6" \
-            "--disable-builddir --disable-multi-os-directory --disable-shared --enable-static CFLAGS=\"-s USE_PTHREADS=0 -s EXPORT_ALL=1\"" \
-            "sed -i '1i#include <stdlib.h>\n#include <stdbool.h>\n#ifndef __EMSCRIPTEN__' src/tramp.c && sed -i '\$a#else\nvoid ffi_tramp_init(void) {}\nvoid *tramp_table_alloc(void) { return NULL; }\nvoid ffi_tramp_free(void *tramp) {}\nbool tramp_table_map(void *table) { return false; }\nvoid tramp_table_unmap(void *table) {}\nvoid ffi_tramp_lock(void) {}\nvoid ffi_tramp_unlock(void) {}\nbool ffi_tramp_init_os(void) { return false; }\n#endif' src/tramp.c"
           build_lib "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz" "pcre2" "10.44" \
             "--disable-shared --enable-static --disable-jit"
-
-          # Build GLib with specific handling
-          echo "Building GLib..."
-          wget -q https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
-          tar -xf glib-2.80.0.tar.xz
-          cd glib-2.80.0
-          sed -i "/# res_query()/a\if cc.has_header('emscripten.h')\n  have_res_query = true\nelse" gio/meson.build
-          sed -i "/if not cc.links(res_query_test_full, name : 'res_query()')/a\endif" gio/meson.build
-          sed -i 's/gcomp->strncmp_func = strncmp/gcomp->strncmp_func = (GCompletionStrncmpFunc)strncmp/' glib/deprecated/gcompletion.c
-          cat > emscripten-stubs.c << 'EOF'
-          #include <sys/types.h>
-          #include <unistd.h>
-          #include <errno.h>
-          int res_query(const char *dname, int class, int type, unsigned char *answer, int anslen) { errno = ENOSYS; return -1; }
-          int posix_spawnp(pid_t *pid, const char *file, const void *file_actions, const void *attrp, char *const argv[], char *const envp[]) { errno = ENOSYS; return -1; }
-          EOF
-          meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSCRIPTEN }}/cache/sysroot" \
-            --wrap-mode=nofallback -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false -Dxattr=false \
-            -Dc_args='-Wno-error -Wno-cast-function-type-mismatch -Wno-unused-parameter -Wno-incompatible-function-pointer-types' \
-            -Dc_link_args='-s USE_PTHREADS=0'
-          cp emscripten-stubs.c glib/
-          sed -i "/^[[:space:]]*glib_sources[[:space:]]*=[[:space:]]*\\[\\]/a\glib_sources += ['emscripten-stubs.c']" glib/meson.build
-          meson compile -C build
-          meson install -C build
 
       - name: Fetch QEMU Source
         run: |
@@ -165,15 +125,7 @@ jobs:
         run: |
           cd qemu
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          sed -i '/uname -s/i\host_os=linux\nbogus_os=no' configure
-          sed -i 's/error_exit "Unrecognized host OS \(.*\)"/if [ "$host_os" = "linux" ]; then echo "Bypassing OS check"; else error_exit "Unrecognized host OS ($1)"; fi/' configure
-          sed -i "/error.*You either need GCC v7.4/i\if cc.has_header('emscripten.h')\n  message('Emscripten detected, skipping version check')\nelse" meson.build
-          sed -i '/error.*You either need GCC v7.4/a\endif' meson.build
-          sed -i "/appleframeworks_dep = dependency('appleframeworks'/i\if cc.has_header('emscripten.h')\n  appleframeworks_dep = declare_dependency()\nelse" meson.build
-          sed -i "/appleframeworks_dep = dependency('appleframeworks'/a\endif" meson.build
           echo '#include <errno.h>\n#ifdef __EMSCRIPTEN__\nint memfd_create(const char *name, unsigned int flags) { errno = ENOSYS; return -1; }\n#else\n#error "memfd_create not supported"\n#endif' > util/memfd.c
-          sed -i 's/size_t len;/gsize len;/' util/oslib-posix.c
-          sed -i 's/size_t \*len/gsize *len/' util/oslib-posix.c
 
       - name: Create Stub Headers
         run: |
@@ -210,18 +162,17 @@ jobs:
           echo "EMCC_WRAPPER=$(pwd)/emcc-wrapper.sh" >> $GITHUB_ENV
           echo "EMXX_WRAPPER=$(pwd)/em++-wrapper.sh" >> $GITHUB_ENV
 
-      - name: Configure QEMU
+      - name: Configure QEMU for Android
         id: configure
         env:
           CC: "${{ env.EMCC_WRAPPER }}"
           CXX: "${{ env.EMXX_WRAPPER }}"
-          TARGET_ARCH: ${{ matrix.target == 'i386-softmmu' && 'i386' || 'x86_64' }}
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
           emconfigure ./configure \
             --python=python3 \
-            --target-list="${{ matrix.target }}" \
+            --target-list="i386-softmmu" \
             --disable-xen --disable-user --disable-linux-user --disable-bsd-user \
             --disable-tools --disable-vnc --disable-gtk \
             --cross-prefix="" \
@@ -232,36 +183,37 @@ jobs:
           || { cat config.log; exit 1; }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
 
-      - name: Build QEMU WebAssembly
+      - name: Build QEMU WebAssembly and Binary for Android
         if: env.CONFIGURE_SUCCEEDED == 'true'
         timeout-minutes: 45
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          ARCH="${{ matrix.target }}"
-          ARCH="${ARCH%-softmmu}"
-          # Ensure stubs directory is included in the include path
           export CFLAGS="${{ env.BASE_CFLAGS }} -I${{ env.STUBS_DIR }} -DPCRE2_STATIC -Wno-incompatible-pointer-types"
           export LDFLAGS="${{ env.BASE_LDFLAGS }} -s EXPORTED_FUNCTIONS='[_main,_malloc,_free]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]'"
-          # Build with verbose output and parallel jobs
-          emmake make -j$(nproc) V=1 qemu-system-$ARCH \
+          # Build both binary and WASM
+          emmake make -j$(nproc) V=1 qemu-system-i386 \
             || { cat build/meson-logs/meson-log.txt 2>/dev/null || echo "No meson logs available"; exit 1; }
-          # Verify the output file exists
-          [ -f "${{ matrix.target }}/qemu-system-$ARCH.wasm" ] || { echo "Error: .wasm file not generated!"; ls -lh ${{ matrix.target }}; exit 1; }
+          # Verify outputs
+          [ -f "i386-softmmu/qemu-system-i386" ] || { echo "Error: Binary file not generated!"; ls -lh i386-softmmu; exit 1; }
+          [ -f "i386-softmmu/qemu-system-i386.wasm" ] || { echo "Error: WASM file not generated!"; ls -lh i386-softmmu; exit 1; }
 
       - name: Validate WASM Output
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
-          cd qemu/${{ matrix.target }}
-          file qemu-system-*.wasm | grep -q "WebAssembly" || { echo "Error: Not a valid WASM file"; exit 1; }
-          echo "WASM file size: $(du -h qemu-system-*.wasm | cut -f1)"
+          cd qemu/i386-softmmu
+          file qemu-system-i386.wasm | grep -q "WebAssembly" || { echo "Error: Not a valid WASM file"; exit 1; }
+          echo "WASM file size: $(du -h qemu-system-i386.wasm | cut -f1)"
+          echo "Binary file size: $(du -h qemu-system-i386 | cut -f1)"
 
-      - name: Upload Artifact
+      - name: Upload Artifacts
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-wasm-${{ matrix.target }}
-          path: qemu/${{ matrix.target }}/qemu-system-*.wasm
+          name: qemu-android-i386
+          path: |
+            qemu/i386-softmmu/qemu-system-i386
+            qemu/i386-softmmu/qemu-system-i386.wasm
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
