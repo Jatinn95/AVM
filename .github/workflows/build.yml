@@ -240,22 +240,23 @@ jobs:
           || { cat config.log; exit 1; }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
 
-- name: Build QEMU WebAssembly
-  if: env.CONFIGURE_SUCCEEDED == 'true'
-  timeout-minutes: 45
-  run: |
-    source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-    cd qemu
-    ARCH="${{ matrix.target }}"
-    ARCH="${ARCH%-softmmu}"
-    # Ensure stubs directory is included in the include path
-    export CFLAGS="${{ env.BASE_CFLAGS }} -I${{ env.STUBS_DIR }} -DPCRE2_STATIC -Wno-incompatible-pointer-types"
-    export LDFLAGS="${{ env.BASE_LDFLAGS }} -s EXPORTED_FUNCTIONS='[_main,_malloc,_free]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]'"
-    # Build with verbose output and parallel jobs
-    emmake make -j$(nproc) V=1 qemu-system-$ARCH \
-      || { cat build/meson-logs/meson-log.txt 2>/dev/null || echo "No meson logs available"; exit 1; }
-    # Verify the output file exists
-    [ -f "${{ matrix.target }}/qemu-system-$ARCH.wasm" ] || { echo "Error: .wasm file not generated!"; ls -lh ${{ matrix.target }}; exit 1; }
+      - name: Build QEMU WebAssembly
+        if: env.CONFIGURE_SUCCEEDED == 'true'
+        timeout-minutes: 45
+        run: |
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          cd qemu
+          ARCH="${{ matrix.target }}"
+          ARCH="${ARCH%-softmmu}"
+          # Ensure stubs directory is included in the include path
+          export CFLAGS="${{ env.BASE_CFLAGS }} -I${{ env.STUBS_DIR }} -DPCRE2_STATIC -Wno-incompatible-pointer-types"
+          export LDFLAGS="${{ env.BASE_LDFLAGS }} -s EXPORTED_FUNCTIONS='[_main,_malloc,_free]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]'"
+          # Build with verbose output and parallel jobs
+          emmake make -j$(nproc) V=1 qemu-system-$ARCH \
+            || { cat build/meson-logs/meson-log.txt 2>/dev/null || echo "No meson logs available"; exit 1; }
+          # Verify the output file exists
+          [ -f "${{ matrix.target }}/qemu-system-$ARCH.wasm" ] || { echo "Error: .wasm file not generated!"; ls -lh ${{ matrix.target }}; exit 1; }
+
       - name: Validate WASM Output
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
