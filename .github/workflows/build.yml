@@ -39,9 +39,12 @@ jobs:
           echo "hw.gpu.mode=swiftshader_indirect" >> ~/.android/avd/test.avd/config.ini
           echo "hw.gpu.enabled=yes" >> ~/.android/avd/test.avd/config.ini
 
+          # Ensure no existing emulator processes interfere
+          echo "Killing any existing emulator processes..."
+          pkill -f emulator || true
+
           # Start emulator with explicit TCG acceleration
           echo "Starting emulator with TCG acceleration..."
-          pkill -f emulator || true  # Kill any existing emulator processes
           /usr/local/lib/android/sdk/emulator/emulator -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -machine type=pc,accel=tcg -verbose > emulator.log 2>&1 &
           sleep 10  # Wait for emulator to begin starting
           cat emulator.log  # Output initial logs for debugging
