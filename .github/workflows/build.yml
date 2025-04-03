@@ -47,9 +47,6 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"  # Caches based on requirements.txt
-          # Annotation: This step failed because no requirements.txt or pyproject.toml was found.
-          # Fix: Add a requirements.txt file with "meson" and "packaging" to enable caching.
-          # If not added, this will still work but won't cache pip installs efficiently.
 
       - name: Install System Dependencies
         run: |
@@ -62,12 +59,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install meson packaging
-          # Annotation: These dependencies are installed inline. To fix caching errors,
-          # create a requirements.txt with:
-          #   meson
-          #   packaging
-          # and commit it to the repository. This ensures actions/setup-python caches them.
+          python -m pip install -r requirements.txt
 
       - name: Install Emscripten
         if: steps.cache-deps.outputs.cache-hit != 'true'
