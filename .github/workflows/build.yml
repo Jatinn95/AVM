@@ -183,19 +183,18 @@ jobs:
           || { cat config.log; exit 1; }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
 
-      - name: Build QEMU WebAssembly and Binary for Android
+      - name: Build QEMU WebAssembly for Android
         if: env.CONFIGURE_SUCCEEDED == 'true'
         timeout-minutes: 45
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
           export CFLAGS="${{ env.BASE_CFLAGS }} -I${{ env.STUBS_DIR }} -DPCRE2_STATIC -Wno-incompatible-pointer-types"
-          export LDFLAGS="${{ env.BASE_LDFLAGS }} -s EXPORTED_FUNCTIONS='[_main,_malloc,_free]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]'"
-          # Build both binary and WASM
-          emmake make -j$(nproc) V=1 qemu-system-i386 \
+          export LDFLAGS="${{ env.BASE_LDFLAGS }} -s EXPORTED_FUNCTIONS='[_main,_malloc,_free]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s WASM=1"
+          # Build only the WASM file
+          emmake make -j$(nproc) V=1 i386-softmmu/qemu-system-i386.wasm \
             || { cat build/meson-logs/meson-log.txt 2>/dev/null || echo "No meson logs available"; exit 1; }
-          # Verify outputs
-          [ -f "i386-softmmu/qemu-system-i386" ] || { echo "Error: Binary file not generated!"; ls -lh i386-softmmu; exit 1; }
+          # Verify WASM output
           [ -f "i386-softmmu/qemu-system-i386.wasm" ] || { echo "Error: WASM file not generated!"; ls -lh i386-softmmu; exit 1; }
 
       - name: Validate WASM Output
@@ -204,16 +203,13 @@ jobs:
           cd qemu/i386-softmmu
           file qemu-system-i386.wasm | grep -q "WebAssembly" || { echo "Error: Not a valid WASM file"; exit 1; }
           echo "WASM file size: $(du -h qemu-system-i386.wasm | cut -f1)"
-          echo "Binary file size: $(du -h qemu-system-i386 | cut -f1)"
 
-      - name: Upload Artifacts
+      - name: Upload Artifact
         if: env.CONFIGURE_SUCCEEDED == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-android-i386
-          path: |
-            qemu/i386-softmmu/qemu-system-i386
-            qemu/i386-softmmu/qemu-system-i386.wasm
+          name: qemu-android-i386-wasm
+          path: qemu/i386-softmmu/qemu-system-i386.wasm
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
       - name: Cleanup
