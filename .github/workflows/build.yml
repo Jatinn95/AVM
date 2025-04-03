@@ -1,33 +1,92 @@
-#!/bin/bash
+name: Android Emulator with Root Access
 
-# Update & Install Dependencies
-sudo apt update && sudo apt install -y waydroid adb wget unzip net-tools novnc websockify
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
 
-# Initialize Waydroid (Android VM)
-sudo waydroid init
+jobs:
+  android_emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-# Start Waydroid Container
-sudo systemctl start waydroid-container
-waydroid session start &
-sleep 10
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-# Enable Root Access
-sudo waydroid shell "su -c 'setenforce 0'"
+    - name: Set up JDK
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
 
-# Install APK File (Specify Your APK Path)
-APK_PATH="/path/to/your.apk"
-adb connect localhost:5555
-adb install "$APK_PATH"
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
 
-# Capture Network Logs using tcpdump
-sudo waydroid shell "su -c 'tcpdump -i any -w /sdcard/network_log.pcap'" &
+    - name: Install system image
+      run: |
+        sdkmanager --install "system-images;android-30;google_apis;x86_64"
+        echo "System image installed"
 
-# Start VNC Server for Web Access
-waydroid prop set persist.waydroid.vnc 1
-waydroid session stop
-waydroid session start &
-sleep 5
-websockify --web /usr/share/novnc/ 6080 localhost:5900 &
+    - name: Create and configure AVD
+      run: |
+        echo "no" | avdmanager create avd \
+          --name test \
+          --package "system-images;android-30;google_apis;x86_64" \
+          --abi "x86_64" \
+          --device "pixel_4"
+        
+        # Configure AVD for better performance
+        echo "hw.ramSize=2048" >> ~/.android/avd/test.avd/config.ini
+        echo "hw.gpu.enabled=yes" >> ~/.android/avd/test.avd/config.ini
+        echo "hw.gpu.mode=auto" >> ~/.android/avd/test.avd/config.ini
+        echo "hw.keyboard=yes" >> ~/.android/avd/test.avd/config.ini
+        echo "vm.heapSize=256" >> ~/.android/avd/test.avd/config.ini
 
-echo "Android VM is accessible via: http://localhost:6080"
-echo "Network logs saved in: /sdcard/network_log.pcap"
+    - name: Start emulator with KVM
+      run: |
+        sudo apt-get -qq install qemu-kvm
+        sudo chmod 777 /dev/kvm
+        
+        $ANDROID_SDK_ROOT/emulator/emulator \
+          -avd test \
+          -no-window \
+          -no-audio \
+          -no-boot-anim \
+          -gpu auto \
+          -accel on \
+          -writable-system \
+          -qemu -m 2048 -enable-kvm &
+        
+        adb wait-for-device
+        echo "Emulator started successfully"
+
+    - name: Root the emulator
+      run: |
+        adb root
+        adb remount
+        adb shell avbctl disable-verification
+        adb reboot
+        adb wait-for-device
+        adb root
+        adb remount
+        echo "Emulator rooted successfully"
+
+    - name: Install APKs and setup monitoring
+      run: |
+        # Install your APK
+        adb install app-debug.apk
+        
+        # Install monitoring tools
+        adb push tcpdump /data/local/tmp/tcpdump
+        adb shell chmod +x /data/local/tmp/tcpdump
+        
+        # Start network monitoring
+        adb shell /data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &
+        
+        echo "Network monitoring started"
+
+    - name: Keep alive
+      run: |
+        echo "Emulator will remain active for 15 minutes"
+        sleep 900
