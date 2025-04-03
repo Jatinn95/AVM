@@ -5,137 +5,90 @@ on:
   push:
     branches: [ main ]
 
-# Define environment variables for reusability
-env:
-  API_LEVEL: 30
-  ARCH: arm64-v8a
-  PROFILE: Nexus 5X
-  TIMEOUT_MINUTES: 60
-
 jobs:
   rooted_emulator:
     runs-on: macos-latest
-    timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
+    timeout-minutes: 60
     
     steps:
-    # Checkout repository code
-    - name: Checkout Repository
+    - name: Checkout code
       uses: actions/checkout@v4
 
-    # Cache JDK to speed up subsequent runs
-    - name: Cache JDK
-      uses: actions/cache@v3
-      with:
-        path: ~/.gradle
-        key: ${{ runner.os }}-jdk-${{ hashFiles('**/*.gradle*') }}
-        restore-keys: ${{ runner.os }}-jdk-
-
-    - name: Set up JDK 17
+    - name: Set up JDK
       uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
         java-version: '17'
 
-    # Cache Android SDK components
-    - name: Cache Android SDK
-      uses: actions/cache@v3
-      with:
-        path: ~/Android/sdk
-        key: ${{ runner.os }}-android-sdk-${{ env.API_LEVEL }}-${{ env.ARCH }}
-
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
-
-    - name: Install ARM64 System Image
-      run: |
-        sdkmanager --install "system-images;android-${{ env.API_LEVEL }};google_apis;${{ env.ARCH }}"
-        echo "ARM64 system image installed for API ${{ env.API_LEVEL }}"
-
-    # Create and start rooted emulator with better error handling
-    - name: Create and Start Rooted AVD
-      uses: reactivecircus/android-emulator-runner@v2
-      id: emulator
       with:
-        api-level: ${{ env.API_LEVEL }}
-        arch: ${{ env.ARCH }}
-        profile: ${{ env.PROFILE }}
-        force-avd-creation: true
-        emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -accel auto
-        disable-animations: true
-        script: |
-          set -e  # Exit on any error
-          echo "Waiting for emulator to boot..."
-          adb wait-for-device || { echo "Emulator boot failed"; exit 1; }
-          
-          echo "Device booted, attempting root process..."
-          adb root || { echo "Failed to root emulator"; exit 1; }
-          adb remount || { echo "Failed to remount system"; exit 1; }
-          
-          adb shell avbctl disable-verification || echo "AVB disable failed, continuing..."
-          adb reboot
-          
-          echo "Waiting for reboot..."
-          adb wait-for-device || { echo "Reboot failed"; exit 1; }
-          adb root || { echo "Root after reboot failed"; exit 1; }
-          adb remount || { echo "Remount after reboot failed"; exit 1; }
-          
-          echo "Emulator successfully rooted and ready"
+        cmdline-tools: 'latest'
+        build-tools: '34.0.0'
+        platform-tools: 'latest'
+        platforms: 'android-30'
+        emulator: 'latest'
+        ndk: 'none'
 
-    # Install dependencies with version checking
-    - name: Install Required Packages
+    - name: Install ARM64 system image
+      run: |
+        sdkmanager --install "system-images;android-30;google_apis;arm64-v8a"
+        echo "arm64 system image installed"
+
+    - name: Configure and start emulator
+      run: |
+        # Create AVD
+        echo "no" | avdmanager create avd \
+          --force \
+          --name test \
+          --package "system-images;android-30;google_apis;arm64-v8a" \
+          --abi "arm64-v8a" \
+          --device "Nexus 5X"
+        
+        # Modify AVD config
+        echo "hw.cpu.ncore=2" >> ~/.android/avd/test.avd/config.ini
+        echo "hw.gpu.enabled=no" >> ~/.android/avd/test.avd/config.ini
+        echo "hw.gpu.mode=swiftshader_indirect" >> ~/.android/avd/test.avd/config.ini
+        echo "vm.heapSize=256" >> ~/.android/avd/test.avd/config.ini
+        
+        # Start emulator with full software rendering
+        nohup $ANDROID_SDK_ROOT/emulator/emulator \
+          -avd test \
+          -port 5554 \
+          -no-window \
+          -no-snapshot \
+          -no-audio \
+          -no-boot-anim \
+          -gpu swiftshader_indirect \
+          -accel off \
+          -qemu -machine virt,accel=tcg,tb-size=128 \
+          -memory 2048 \
+          -partition-size 2048 \
+          -writable-system \
+          > /dev/null 2>&1 &
+        
+        # Wait for emulator to start
+        adb wait-for-device
+        echo "Emulator started successfully"
+
+    - name: Root the emulator
+      run: |
+        adb root
+        adb remount
+        adb shell avbctl disable-verification
+        adb reboot
+        adb wait-for-device
+        adb root
+        adb remount
+        echo "Emulator rooted successfully"
+
+    - name: Install required packages
       run: |
         brew install scrcpy websockify novnc
-        scrcpy --version
-        websockify --version
-        echo "Packages installed successfully"
 
-    # Set up web access with proper background process management
-    - name: Setup Web Access and Monitoring
+    - name: Setup web access
       run: |
-        # Start scrcpy server
-        adb forward tcp:8888 localabstract:scrcpy || { echo "ADB forwarding failed"; exit 1; }
-        
-        # Start websockify and noVNC in background with logging
-        websockify --web /usr/local/share/novnc --log-file=websockify.log 6080 localhost:8888 &
-        echo $! > websockify.pid
-        
-        # Start network monitoring with root privileges
-        adb shell su -c "tcpdump -i any -s 0 -w /sdcard/network.pcap" &
-        echo $! > tcpdump.pid
-        
-        # Start HTTP server for logs
-        python3 -m http.server 8000 --directory /tmp &
-        echo $! > http.pid
-        
-        # Output access information
+        adb forward tcp:8888 localabstract:scrcpy
+        websockify --web /usr/local/share/novnc 6080 localhost:8888 &
         echo "Web interface available at: http://localhost:6080/vnc.html"
-        echo "Network logs available at: http://localhost:8000/network.pcap"
-
-    # Upload artifacts for debugging
-    - name: Upload Logs and Artifacts
-      if: always()  # Run even if previous steps fail
-      uses: actions/upload-artifact@v3
-      with:
-        name: emulator-logs
-        path: |
-          *.log
-          *.pcap
-          /sdcard/network.pcap
-
-    # Graceful shutdown and cleanup
-    - name: Cleanup and Shutdown
-      if: always()
-      run: |
-        echo "Shutting down services..."
-        [ -f websockify.pid ] && kill $(cat websockify.pid) || echo "No websockify process found"
-        [ -f tcpdump.pid ] && kill $(cat tcpdump.pid) || echo "No tcpdump process found"
-        [ -f http.pid ] && kill $(cat http.pid) || echo "No HTTP server process found"
-        adb emu kill || echo "Emulator already stopped"
-        echo "Cleanup complete"
-
-    # Keep alive with configurable duration
-    - name: Keep Alive for Debugging
-      run: |
-        KEEP_ALIVE_MINUTES=30
-        echo "Keeping emulator alive for $KEEP_ALIVE_MINUTES minutes..."
-        sleep $((KEEP_ALIVE_MINUTES * 60))
+        sleep 1800
