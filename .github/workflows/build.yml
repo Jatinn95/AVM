@@ -35,13 +35,13 @@ jobs:
     - name: Setup Android SDK
       run: |
         # Ensure sdkmanager is executable
-        chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+        sudo chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
         
         # Accept licenses
-        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses || true
+        echo "y" | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses || true
         
         # Install required components
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --install \
+        sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --install \
           "build-tools;35.0.0" \
           "platform-tools" \
           "platforms;android-30" \
