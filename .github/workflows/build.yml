@@ -1,4 +1,4 @@
-name: Android Emulator with Root Access
+name: Android Emulator CI
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 
 jobs:
-  android_emulator:
+  android_test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -14,7 +14,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up JDK
+    - name: Set up JDK 17
       uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
@@ -32,119 +32,87 @@ jobs:
 
     - name: Install system image
       run: |
+        # Accept licenses first
+        yes | sdkmanager --licenses || true
         sdkmanager --install "system-images;android-30;google_apis;x86_64"
-        echo "System image installed"
+        sdkmanager --list
 
-    - name: Create and configure AVD
+    - name: Create Android Virtual Device
       run: |
-        # Verify the system image exists
-        if [ ! -d "$ANDROID_SDK_ROOT/system-images/android-30/google_apis/x86_64" ]; then
-          echo "System image not found!"
-          exit 1
-        fi
-        
-        # Create AVD directory structure
-        mkdir -p "$HOME/.android/avd/test.avd/"
-        
-        # Create the AVD
+        # Create AVD directory if it doesn't exist
+        mkdir -p ~/.android/avd
+
+        # Create the AVD with more reliable parameters
         echo "no" | avdmanager create avd \
           --force \
-          --name test \
+          --name "android-ci" \
           --package "system-images;android-30;google_apis;x86_64" \
           --abi "x86_64" \
           --device "pixel_4"
-        
-        # Verify AVD creation
-        if [ ! -f "$HOME/.android/avd/test.avd/config.ini" ]; then
-          echo "AVD creation failed!"
+
+        # Verify AVD was created
+        if [ ! -f ~/.android/avd/android-ci.avd/config.ini ]; then
+          echo "AVD configuration file not found!"
+          ls -la ~/.android/avd/
           exit 1
         fi
-        
-        # Configure AVD
-        {
-          echo "hw.ramSize=2048"
-          echo "hw.gpu.enabled=yes"
-          echo "hw.gpu.mode=auto"
-          echo "hw.keyboard=yes"
-          echo "vm.heapSize=256"
-          echo "disk.dataPartition.size=2G"
-        } >> "$HOME/.android/avd/test.avd/config.ini"
-        
-        echo "AVD created and configured successfully"
+
+        # Configure AVD settings
+        echo "hw.ramSize=2048" >> ~/.android/avd/android-ci.avd/config.ini
+        echo "hw.gpu.enabled=yes" >> ~/.android/avd/android-ci.avd/config.ini
+        echo "hw.gpu.mode=host" >> ~/.android/avd/android-ci.avd/config.ini
+        echo "hw.keyboard=yes" >> ~/.android/avd/android-ci.avd/config.ini
+        echo "vm.heapSize=256" >> ~/.android/avd/android-ci.avd/config.ini
+        echo "disk.dataPartition.size=2G" >> ~/.android/avd/android-ci.avd/config.ini
+
+        echo "AVD created successfully"
 
     - name: Setup KVM acceleration
       run: |
-        sudo apt-get -qq update
-        sudo apt-get -qq install qemu-kvm
+        sudo apt-get update -qq
+        sudo apt-get install -qq qemu-kvm
         sudo chmod 777 /dev/kvm
         groups
-        echo "KVM setup complete"
+        echo "KVM acceleration ready"
 
     - name: Start emulator
       run: |
-        $ANDROID_SDK_ROOT/emulator/emulator \
-          -avd test \
+        # Start emulator in background
+        nohup $ANDROID_SDK_ROOT/emulator/emulator \
+          -avd android-ci \
           -no-window \
           -no-audio \
           -no-boot-anim \
-          -gpu auto \
+          -gpu host \
           -accel on \
           -writable-system \
-          -qemu -m 2048 -enable-kvm &
-        
-        # Wait for device to be ready
+          -qemu -m 2048 -enable-kvm > /dev/null 2>&1 &
+
+        # Wait for emulator to start
         adb wait-for-device
-        while [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
+        echo "Emulator started. Waiting for boot completion..."
+        
+        # Wait for boot completion
+        while true; do
+          boot_completed=$(adb shell getprop sys.boot_completed | tr -d '\r')
+          if [ "$boot_completed" == "1" ]; then
+            break
+          fi
           sleep 5
           echo "Waiting for emulator to boot..."
         done
-        echo "Emulator started successfully"
+        
+        echo "Emulator is ready"
 
-    - name: Root the emulator
+    - name: Basic device verification
       run: |
-        adb root
-        adb remount
-        adb shell avbctl disable-verification
-        adb reboot
-        adb wait-for-device
-        while [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
-          sleep 5
-          echo "Waiting for emulator to reboot..."
-        done
-        adb root
-        adb remount
-        echo "Emulator rooted successfully"
+        adb shell getprop
+        adb devices -l
+        adb shell settings put global window_animation_scale 0
+        adb shell settings put global transition_animation_scale 0
+        adb shell settings put global animator_duration_scale 0
 
-    - name: Install APKs and setup monitoring
+    - name: Keep emulator running
       run: |
-        # Install your APK
-        adb install app-debug.apk
-        
-        # Install monitoring tools
-        curl -L https://github.com/Example/tcpdump/releases/download/v1.0/tcpdump -o tcpdump
-        adb push tcpdump /data/local/tmp/tcpdump
-        adb shell chmod +x /data/local/tmp/tcpdump
-        
-        # Start network monitoring
-        adb shell /data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &
-        
-        echo "Network monitoring started"
-
-    - name: Setup web access
-      run: |
-        # Install required tools
-        sudo apt-get -qq install scrcpy websockify novnc
-        
-        # Start scrcpy server
-        adb forward tcp:8888 localabstract:scrcpy
-        
-        # Start websockify and noVNC
-        websockify --web /usr/share/novnc 6080 localhost:8888 &
-        
-        echo "Web interface available at: http://localhost:6080/vnc.html"
-        echo "Network logs available at: /sdcard/network.pcap"
-
-    - name: Keep alive
-      run: |
-        echo "Emulator will remain active for 15 minutes"
+        echo "Emulator will stay active for 15 minutes"
         sleep 900
