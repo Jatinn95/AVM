@@ -1,127 +1,33 @@
-name: Rooted Android Emulator with Web Access
+#!/bin/bash
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
+# Update & Install Dependencies
+sudo apt update && sudo apt install -y waydroid adb wget unzip net-tools novnc websockify
 
-# Define environment variables for reusability
-env:
-  API_LEVEL: 30
-  ARCH: arm64-v8a
-  PROFILE: Nexus 5X
-  TIMEOUT_MINUTES: 60  # Define timeout here, but we'll use it differently
+# Initialize Waydroid (Android VM)
+sudo waydroid init
 
-jobs:
-  rooted_emulator:
-    runs-on: macos-latest
-    # Removed timeout-minutes from here due to env reference limitation
-    steps:
-    # Checkout repository code
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+# Start Waydroid Container
+sudo systemctl start waydroid-container
+waydroid session start &
+sleep 10
 
-    # Cache JDK to speed up subsequent runs
-    - name: Cache JDK
-      uses: actions/cache@v3
-      with:
-        path: ~/.gradle
-        key: ${{ runner.os }}-jdk-${{ hashFiles('**/*.gradle*') }}
-        restore-keys: ${{ runner.os }}-jdk-
+# Enable Root Access
+sudo waydroid shell "su -c 'setenforce 0'"
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        distribution: 'temurin'
-        java-version: '17'
+# Install APK File (Specify Your APK Path)
+APK_PATH="/path/to/your.apk"
+adb connect localhost:5555
+adb install "$APK_PATH"
 
-    # Cache Android SDK components
-    - name: Cache Android SDK
-      uses: actions/cache@v3
-      with:
-        path: ~/Android/sdk
-        key: ${{ runner.os }}-android-sdk-${{ env.API_LEVEL }}-${{ env.ARCH }}
+# Capture Network Logs using tcpdump
+sudo waydroid shell "su -c 'tcpdump -i any -w /sdcard/network_log.pcap'" &
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
+# Start VNC Server for Web Access
+waydroid prop set persist.waydroid.vnc 1
+waydroid session stop
+waydroid session start &
+sleep 5
+websockify --web /usr/share/novnc/ 6080 localhost:5900 &
 
-    - name: Install ARM64 System Image
-      run: |
-        sdkmanager --install "system-images;android-${{ env.API_LEVEL }};google_apis;${{ env.ARCH }}"
-        echo "ARM64 system image installed for API ${{ env.API_LEVEL }}"
-
-    # Create and start rooted emulator with timeout at step level
-    - name: Create and Start Rooted AVD
-      uses: reactivecircus/android-emulator-runner@v2
-      id: emulator
-      timeout-minutes: ${{ env.TIMEOUT_MINUTES }}  # Moved timeout here where env is supported
-      with:
-        api-level: ${{ env.API_LEVEL }}
-        arch: ${{ env.ARCH }}
-        profile: ${{ env.PROFILE }}
-        force-avd-creation: true
-        emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -accel auto
-        disable-animations: true
-        script: |
-          set -e
-          echo "Waiting for emulator to boot..."
-          adb wait-for-device || { echo "Emulator boot failed"; exit 1; }
-          
-          echo "Device booted, attempting root process..."
-          adb root || { echo "Failed to root emulator"; exit 1; }
-          adb remount || { echo "Failed to remount system"; exit 1; }
-          
-          adb shell avbctl disable-verification || echo "AVB disable failed, continuing..."
-          adb reboot
-          
-          echo "Waiting for reboot..."
-          adb wait-for-device || { echo "Reboot failed"; exit 1; }
-          adb root || { echo "Root after reboot failed"; exit 1; }
-          adb remount || { echo "Remount after reboot failed"; exit 1; }
-          
-          echo "Emulator successfully rooted and ready"
-
-    - name: Install Required Packages
-      run: |
-        brew install scrcpy websockify novnc
-        scrcpy --version
-        websockify --version
-        echo "Packages installed successfully"
-
-    - name: Setup Web Access and Monitoring
-      run: |
-        adb forward tcp:8888 localabstract:scrcpy || { echo "ADB forwarding failed"; exit 1; }
-        websockify --web /usr/local/share/novnc --log-file=websockify.log 6080 localhost:8888 &
-        echo $! > websockify.pid
-        adb shell su -c "tcpdump -i any -s 0 -w /sdcard/network.pcap" &
-        echo $! > tcpdump.pid
-        python3 -m http.server 8000 --directory /tmp &
-        echo $! > http.pid
-        echo "Web interface available at: http://localhost:6080/vnc.html"
-        echo "Network logs available at: http://localhost:8000/network.pcap"
-
-    - name: Upload Logs and Artifacts
-      if: always()
-      uses: actions/upload-artifact@v3
-      with:
-        name: emulator-logs
-        path: |
-          *.log
-          *.pcap
-          /sdcard/network.pcap
-
-    - name: Cleanup and Shutdown
-      if: always()
-      run: |
-        echo "Shutting down services..."
-        [ -f websockify.pid ] && kill $(cat websockify.pid) || echo "No websockify process found"
-        [ -f tcpdump.pid ] && kill $(cat tcpdump.pid) || echo "No tcpdump process found"
-        [ -f http.pid ] && kill $(cat http.pid) || echo "No HTTP server process found"
-        adb emu kill || echo "Emulator already stopped"
-        echo "Cleanup complete"
-
-    - name: Keep Alive for Debugging
-      run: |
-        KEEP_ALIVE_MINUTES=30
-        echo "Keeping emulator alive for $KEEP_ALIVE_MINUTES minutes..."
-        sleep $((KEEP_ALIVE_MINUTES * 60))
+echo "Android VM is accessible via: http://localhost:6080"
+echo "Network logs saved in: /sdcard/network_log.pcap"
