@@ -1,14 +1,14 @@
-name: Android Emulator Tests
+name: Rooted Android Emulator with Web Access
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ main ]
-  pull_request:
     branches: [ main ]
 
 jobs:
-  test:
-    runs-on: macos-latest  # macOS is required for hardware acceleration
+  rooted_emulator:
+    runs-on: macos-latest
+    timeout-minutes: 60
     
     steps:
     - name: Checkout code
@@ -17,23 +17,62 @@ jobs:
     - name: Set up JDK
       uses: actions/setup-java@v3
       with:
-        distribution: 'zulu'
         java-version: '17'
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Create AVD and start emulator
+    - name: Create rooted AVD
       uses: reactivecircus/android-emulator-runner@v2
+      id: emulator
       with:
-        api-level: 34
+        api-level: 30  # API 30 is easier to root
         arch: x86_64
-        profile: Nexus 6
+        profile: "Nexus 5X"
         force-avd-creation: true
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -read-only -writable-system
         disable-animations: true
-        script: echo "Emulator started"
+        script: |
+          echo "Rooting emulator..."
+          adb root
+          adb remount
+          adb shell avbctl disable-verification
+          adb reboot
+          sleep 30
+          adb root
+          adb remount
+          adb push superuser.apk /system/app/
+          adb shell settings put global package_verifier_enable 0
+          echo "Emulator rooted"
 
-    - name: Run tests
+    - name: Install APKs
       run: |
-        ./gradlew connectedCheck
+        adb install app-debug.apk  # Your APK file
+        adb install tcpdump.apk    # For network monitoring
+        adb install scrcpy.apk     # For screen mirroring
+
+    - name: Start network monitoring
+      run: |
+        adb shell tcpdump -i any -s 0 -w /sdcard/network.pcap &
+        echo "Network monitoring started"
+
+    - name: Setup web access
+      run: |
+        # Install noVNC and websockify
+        brew install novnc websockify
+        
+        # Start scrcpy with websocket
+        adb forward tcp:8888 localabstract:scrcpy
+        websockify --web /usr/local/share/novnc 6080 localhost:8888 &
+        
+        # Start HTTP server for network logs
+        adb pull /sdcard/network.pcap
+        python3 -m http.server 8000 &
+        
+        echo "Web interface available at: http://localhost:6080/vnc.html"
+        echo "Network logs available at: http://localhost:8000/network.pcap"
+
+    - name: Keep alive for debugging
+      run: |
+        echo "The emulator will remain active for 30 minutes for debugging"
+        sleep 1800
