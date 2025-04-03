@@ -26,18 +26,33 @@ jobs:
       with:
         api-level: 30
         arch: x86
-        target: google_apis  # Ensures system-images;android-30;google_apis;x86
+        target: google_apis
         profile: pixel_4
         force-avd-creation: true
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off -verbose
         disable-animations: true
         emulator-boot-timeout: 900  # 15 minutes in seconds
         script: |
+          echo "Patching AVD config to force software rendering..."
+          echo "hw.cpu.arch=x86" >> ~/.android/avd/test.avd/config.ini
+          echo "hw.gpu.mode=swiftshader_indirect" >> ~/.android/avd/test.avd/config.ini
+          echo "hw.gpu.enabled=yes" >> ~/.android/avd/test.avd/config.ini
           echo "Starting emulator with software rendering..."
-          # Log emulator process to confirm it starts
-          ps aux | grep emulator || echo "No emulator process found"
-          adb wait-for-device
-          # Retry boot check for up to 5 minutes
+          # Log emulator process
+          ps aux | grep emulator || echo "No emulator process found initially"
+          # Wait for emulator with retry logic
+          for attempt in {1..3}; do
+            echo "Attempt $attempt to detect emulator..."
+            adb wait-for-device
+            sleep 10
+            if adb devices | grep -q "emulator-5554"; then
+              echo "Emulator detected!"
+              break
+            fi
+            echo "Emulator not detected, retrying..."
+            ps aux | grep emulator || echo "Emulator process still not running"
+          done
+          # Check boot completion
           for i in {1..30}; do
             if adb shell getprop sys.boot_completed | grep -q "1"; then
               echo "Emulator booted successfully with API 30 (x86, google_apis)"
@@ -49,6 +64,8 @@ jobs:
           if ! adb shell getprop sys.boot_completed | grep -q "1"; then
             echo "Emulator failed to boot after 5 minutes"
             ps aux | grep emulator || echo "Emulator process not running"
+            # Dump emulator logs for debugging
+            cat /usr/local/lib/android/sdk/emulator/qemu-system-x86_64.log || echo "No emulator log found"
             exit 1
           fi
 
