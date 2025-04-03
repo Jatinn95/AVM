@@ -1,4 +1,4 @@
-name: Android Emulator CI
+name: Rooted Android Emulator CI
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
 jobs:
   android_test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
     - name: Checkout code
@@ -28,87 +28,71 @@ jobs:
         platform-tools: 'latest'
         platforms: 'android-30'
         emulator: 'latest'
-        ndk: 'none'
 
-    - name: Install system image
+    - name: Launch Rooted Emulator
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 30
+        arch: x86_64
+        profile: pixel_4
+        force-avd-creation: true
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -enable-kvm
+        disable-animations: true
+        script: |
+          echo "Starting root process..."
+          adb root
+          adb remount
+          adb shell avbctl disable-verification
+          adb reboot
+          adb wait-for-device
+          adb root
+          adb remount
+          adb shell setprop persist.sys.root_access 1
+          echo "Root access enabled!"
+
+    - name: Install Root Tools
       run: |
-        # Accept licenses first
-        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+        # Install SuperSU
+        wget https://github.com/Chainfire/SuperSU/raw/master/arm64/su -O su
+        adb push su /system/xbin/su
+        adb shell chmod 0755 /system/xbin/su
+        adb shell su --install
+        adb shell su --daemon&
+
+        # Verify root
+        adb shell su -c id | grep "uid=0(root)" || echo "Root verification failed"
+
+    - name: Install and Monitor Apps
+      run: |
+        # Install your APK
+        adb install app-debug.apk
+
+        # Install tcpdump for network monitoring
+        wget https://github.com/example/tcpdump/releases/latest/download/tcpdump -O tcpdump
+        adb push tcpdump /data/local/tmp/
+        adb shell chmod +x /data/local/tmp/tcpdump
+
+        # Start network monitoring
+        adb shell su -c "/data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &"
+        echo "Network monitoring started"
+
+    - name: Setup Web Access
+      run: |
+        # Install required tools
+        sudo apt-get install -y scrcpy websockify novnc
+
+        # Start scrcpy server
+        adb forward tcp:8888 localabstract:scrcpy
         
-        # Install system image using absolute path
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "system-images;android-30;google_apis;x86_64"
+        # Start websockify and noVNC
+        websockify --web /usr/share/novnc 6080 localhost:8888 &
         
-        # Verify installation
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --list | grep "system-images;android-30;google_apis;x86_64"
+        echo "VNC Web URL: http://localhost:6080/vnc.html"
+        echo "Note: For GitHub runners, you'll need ngrok to expose these ports"
 
-    - name: Create Android Virtual Device
+    - name: Keep Alive
       run: |
-        # Create necessary directories
-        mkdir -p ~/.android/avd
-        touch ~/.android/repositories.cfg
-
-        # Create AVD with absolute paths
-        echo "no" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/avdmanager create avd \
-          --force \
-          --name "ci_emulator" \
-          --package "system-images;android-30;google_apis;x86_64" \
-          --abi "x86_64" \
-          --device "pixel"
-
-        # Verify AVD creation
-        if [ ! -f ~/.android/avd/ci_emulator.avd/config.ini ]; then
-          echo "AVD configuration file not found!"
-          echo "Contents of ~/.android/avd/:"
-          ls -la ~/.android/avd/
-          echo "Contents of ~/.android/avd/ci_emulator.avd/:"
-          ls -la ~/.android/avd/ci_emulator.avd/ || true
-          exit 1
-        fi
-
-        # Configure AVD
-        echo "hw.ramSize=2048" >> ~/.android/avd/ci_emulator.avd/config.ini
-        echo "hw.gpu.enabled=yes" >> ~/.android/avd/ci_emulator.avd/config.ini
-        echo "hw.gpu.mode=auto" >> ~/.android/avd/ci_emulator.avd/config.ini
-        echo "vm.heapSize=256" >> ~/.android/avd/ci_emulator.avd/config.ini
-        echo "disk.dataPartition.size=2G" >> ~/.android/avd/ci_emulator.avd/config.ini
-
-    - name: Setup KVM acceleration
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -qq qemu-kvm
-        sudo chmod 777 /dev/kvm
-        echo "KVM status:"
-        sudo kvm-ok || true
-
-    - name: Start emulator
-      run: |
-        # Start emulator with absolute path
-        nohup $ANDROID_SDK_ROOT/emulator/emulator \
-          -avd ci_emulator \
-          -no-window \
-          -no-audio \
-          -no-boot-anim \
-          -gpu auto \
-          -accel on \
-          -writable-system \
-          -qemu -m 2048 -enable-kvm > emulator.log 2>&1 &
-
-        # Wait for device
-        $ANDROID_SDK_ROOT/platform-tools/adb wait-for-device
-        echo "Emulator started. Waiting for boot..."
-
-        # Wait for complete boot
-        while true; do
-          boot_completed=$($ANDROID_SDK_ROOT/platform-tools/adb shell getprop sys.boot_completed | tr -d '\r')
-          [ "$boot_completed" = "1" ] && break
-          sleep 5
-          echo "Waiting for boot completion..."
-        done
-
-        echo "Emulator is ready"
-
-    - name: Show emulator logs
-      if: always()
-      run: |
-        echo "Emulator logs:"
-        cat emulator.log || echo "No emulator logs found"
+        echo "Rooted emulator is running for 30 minutes"
+        echo "Network logs: /sdcard/network.pcap"
+        echo "Use 'adb pull /sdcard/network.pcap' to retrieve logs"
+        sleep 1800
