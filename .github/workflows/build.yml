@@ -38,13 +38,13 @@ jobs:
         sudo chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
         # Accept licenses (keep output visible for debugging)
         yes | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses || true
-        # Install required components with arm64-v8a system image
+        # Install required components with x86 system image
         sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --install \
           "build-tools;35.0.0" \
           "platform-tools" \
           "platforms;android-30" \
           "emulator" \
-          "system-images;android-30;default;arm64-v8a" \
+          "system-images;android-30;default;x86" \
           --channel=0
         echo "Android SDK setup completed"
 
@@ -65,16 +65,16 @@ jobs:
 
     - name: Enable KVM Permissions
       run: |
-        # Attempt KVM setup (optional, as arm64-v8a doesn't require it)
+        # Attempt KVM setup (optional, as x86 with software rendering doesn't require it)
         sudo groupadd -r kvm || true
         sudo gpasswd -a runner kvm
         sudo chown root:kvm /dev/kvm || true
         sudo chmod 660 /dev/kvm || true
         # Log KVM status, but proceed with software rendering
         if ! ls -l /dev/kvm | grep -q "kvm"; then
-          echo "KVM setup failed, using arm64-v8a with software rendering"
+          echo "KVM setup failed, using x86 with software rendering"
         else
-          echo "KVM permissions configured (not required for arm64-v8a)"
+          echo "KVM permissions configured (not required for x86 with -accel off)"
         fi
 
     - name: Launch Emulator
@@ -82,7 +82,7 @@ jobs:
       id: emulator
       with:
         api-level: 30
-        arch: arm64-v8a  # Switched to arm64-v8a to avoid KVM issues
+        arch: x86  # Switched to x86 for QEMU2 compatibility on x86_64 host
         profile: pixel_4
         force-avd-creation: true
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off
@@ -94,7 +94,7 @@ jobs:
           # Retry boot check for up to 5 minutes
           for i in {1..30}; do
             if adb shell getprop sys.boot_completed | grep -q "1"; then
-              echo "Emulator booted successfully with API 30 (arm64-v8a)"
+              echo "Emulator booted successfully with API 30 (x86)"
               break
             fi
             echo "Boot check $i/30: Emulator not yet booted, waiting 10 seconds..."
