@@ -20,33 +20,25 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Install Emscripten and Compile WebAssembly
-      run: |
-        git clone https://github.com/emscripten-core/emsdk.git
-        cd emsdk
-        ./emsdk install latest
-        ./emsdk activate latest
-        source ./emsdk_env.sh
-        # Example: Compile a C file (replace with your actual source)
-        echo 'int main() { return 360; }' > test.c  # Placeholder; replace with your code
-        emcc test.c -o i360.js -s EXPORTED_FUNCTIONS='["_main"]' -s WASM=1
-        ls -l i360.js i360.wasm || (echo "WebAssembly compilation failed" && exit 1)
-        echo "WebAssembly compiled successfully"
-
     - name: Install Latest Command-Line Tools
       run: |
+        # Download and install the latest command-line tools (version 11.0.0)
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
         mkdir -p $ANDROID_HOME/cmdline-tools
         unzip -q cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
         mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+        # Set environment variables
         echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
         echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
         echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
     - name: Setup Android SDK
       run: |
+        # Ensure sdkmanager is executable
         sudo chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+        # Accept licenses (capture output for debugging)
         yes | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses || true
+        # Install required components (capture output for debugging)
         sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --install \
           "build-tools;35.0.0" \
           "platform-tools" \
@@ -56,17 +48,34 @@ jobs:
           --channel=0
         echo "Android SDK setup completed"
 
+    - name: Install Emscripten and Compile WebAssembly
+      run: |
+        # Install Emscripten for WebAssembly compilation
+        git clone https://github.com/emscripten-core/emsdk.git
+        cd emsdk
+        ./emsdk install latest
+        ./emsdk activate latest
+        source ./emsdk_env.sh
+        # Compile a placeholder C file (replace with your actual source code)
+        echo 'int main() { return 360; }' > test.c  # Placeholder; update with your code
+        emcc test.c -o i360.js -s EXPORTED_FUNCTIONS='["_main"]' -s WASM=1
+        # Verify both files are generated
+        ls -l i360.js i360.wasm || (echo "WebAssembly compilation failed" && exit 1)
+        echo "WebAssembly compiled successfully (i360.js and i360.wasm generated)"
+
     - name: Enable KVM Permissions
       run: |
+        # Ensure KVM group exists and add runner user
         sudo groupadd -r kvm || true
-        sudo usermod -aG kvm $USER
+        sudo gpasswd -a runner kvm
         sudo chown root:kvm /dev/kvm || true
         sudo chmod 660 /dev/kvm || true
+        # Verify KVM setup
         if ! ls -l /dev/kvm | grep -q "kvm"; then
-          echo "KVM setup failed"
-          exit 1
+          echo "KVM setup failed, proceeding with software rendering"
+        else
+          echo "KVM permissions configured (may still require hardware acceleration)"
         fi
-        echo "KVM permissions configured"
 
     - name: Launch Emulator
       uses: reactivecircus/android-emulator-runner@v2
@@ -76,35 +85,80 @@ jobs:
         arch: x86_64
         profile: pixel_4
         force-avd-creation: true
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -enable-kvm
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off
         disable-animations: true
-        script: |
-          echo "Waiting for emulator to boot..."
-          adb wait-for-device
-          if ! adb shell getprop | grep -q "ro.build.version.sdk"; then
-            echo "Emulator failed to boot"
-            exit 1
-          fi
-          echo "Emulator booted successfully with API 30"
+        timeout-minutes: 15  # Increased timeout for stability
+      script: |
+        echo "Waiting for emulator to boot..."
+        adb wait-for-device
+        # Check if emulator booted successfully
+        if ! adb shell getprop sys.boot_completed | grep -q "1"; then
+          echo "Emulator failed to boot"
+          exit 1
+        fi
+        echo "Emulator booted successfully with API 30"
 
     - name: Push WebAssembly to Emulator
       run: |
+        # Push compiled files to emulator
         adb push i360.js /sdcard/
         adb push i360.wasm /sdcard/
+        # Verify files are on emulator
+        adb shell ls /sdcard/i360.js /sdcard/i360.wasm || (echo "Failed to push files to emulator" && exit 1)
         echo "Pushed i360.js and i360.wasm to emulator"
 
-    # Remaining steps (Install Magisk, Root Tools, etc.) remain unchanged unless you need to modify them
-    # ...
+    - name: Install Magisk for Root
+      run: |
+        # Download Magisk v27.0
+        wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk.zip
+        unzip Magisk.zip "common/*" -d magisk_files
+        # Pull ramdisk.img from emulator
+        adb shell "dd if=/dev/block/by-name/ramdisk of=/sdcard/ramdisk.img"
+        adb pull /sdcard/ramdisk.img
+        # Patch ramdisk with Magisk
+        wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot
+        chmod +x magiskboot
+        ./magiskboot unpack ramdisk.img
+        ./magiskboot cpio ramdisk.cpio "add 0750 init magisk_files/common/magiskinit"
+        ./magiskboot repack ramdisk.img ramdisk-patched.img
+        # Push patched ramdisk and reboot
+        adb push ramdisk-patched.img /sdcard/ramdisk.img
+        adb shell "dd if=/sdcard/ramdisk.img of=/dev/block/by-name/ramdisk"
+        adb reboot
+        adb wait-for-device
+        # Verify root access
+        adb root
+        if ! adb shell su -c "id" | grep -q "uid=0(root)"; then
+          echo "Root verification failed"
+          exit 1
+        fi
+        echo "Root access enabled with Magisk!"
+
+    - name: Install Root Tools and Verify
+      run: |
+        # Install Magisk Manager
+        adb install Magisk.zip
+        adb shell "magisk --daemon &"
+        # Set root persistence
+        adb shell "setprop persist.sys.root_access 1"
+        if ! adb shell "su -c 'whoami'" | grep -q "root"; then
+          echo "Root setup failed"
+          exit 1
+        fi
+        echo "Root tools installed and verified"
 
     - name: Install and Monitor Apps
       run: |
+        # Install APK (assumes app-debug.apk in repo root)
         if ! adb install app-debug.apk; then
           echo "APK installation failed"
           exit 1
         fi
+        # Install tcpdump for network monitoring
         wget -q https://github.com/the-tcpdump-group/tcpdump/releases/download/tcpdump-4.99.4/tcpdump -O tcpdump
         adb push tcpdump /data/local/tmp/
         adb shell "chmod 0755 /data/local/tmp/tcpdump"
+        # Start network capture
         adb shell "/data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &"
         sleep 5
         if ! adb shell "ls /sdcard/network.pcap"; then
@@ -113,4 +167,43 @@ jobs:
         fi
         echo "Network monitoring started"
 
-    # Rest of your steps (ngrok, health monitoring) remain as-is
+    - name: Setup Web Access with ngrok
+      env:
+        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+      run: |
+        # Install tools for web access
+        sudo apt-get update && sudo apt-get install -y scrcpy websockify novnc
+        # Start scrcpy server
+        adb forward tcp:8888 localabstract:scrcpy
+        # Start websockify and noVNC
+        websockify --web /usr/share/novnc 6080 localhost:8888 &
+        # Install and configure ngrok
+        wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+        tar -xzf ngrok-v3-stable-linux-amd64.tgz
+        ./ngrok authtoken $NGROK_AUTH_TOKEN
+        ./ngrok http 6080 --log=stdout > ngrok.log &
+        sleep 5
+        # Extract and display public URL
+        NGROK_URL=$(grep -o "https://[0-9a-z-]*\.ngrok-free.app" ngrok.log)
+        echo "VNC Web URL: $NGROK_URL/vnc.html"
+        echo "Access the emulator via the URL above"
+
+    - name: Keep Alive with Health Monitoring
+      run: |
+        echo "Rooted emulator running for 30 minutes with health checks"
+        echo "Network logs: /sdcard/network.pcap"
+        echo "Use 'adb pull /sdcard/network.pcap' to retrieve logs"
+        # Health check loop for 30 minutes
+        for i in {1..30}; do
+          if ! adb shell getprop | grep -q "ro.build.version.sdk"; then
+            echo "Emulator failed at minute $i"
+            exit 1
+          fi
+          if ! adb shell "su -c 'whoami'" | grep -q "root"; then
+            echo "Root access lost at minute $i"
+            exit 1
+          fi
+          echo "Health check passed at minute $i"
+          sleep 60
+        done
+        echo "Emulator ran successfully for 30 minutes"
