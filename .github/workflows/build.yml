@@ -17,6 +17,7 @@ jobs:
     - name: Set up JDK
       uses: actions/setup-java@v3
       with:
+        distribution: 'temurin'  # Added required distribution
         java-version: '17'
 
     - name: Setup Android SDK
@@ -26,7 +27,7 @@ jobs:
       uses: reactivecircus/android-emulator-runner@v2
       id: emulator
       with:
-        api-level: 30  # API 30 is easier to root
+        api-level: 30
         arch: x86_64
         profile: "Nexus 5X"
         force-avd-creation: true
@@ -45,34 +46,37 @@ jobs:
           adb shell settings put global package_verifier_enable 0
           echo "Emulator rooted"
 
+    - name: Install required files
+      run: |
+        # Download necessary files
+        wget https://example.com/superuser.apk  # Replace with actual SuperSU or Magisk
+        wget https://example.com/tcpdump.apk
+        wget https://example.com/scrcpy.apk
+
     - name: Install APKs
       run: |
+        adb install superuser.apk
+        adb install tcpdump.apk
+        adb install scrcpy.apk
         adb install app-debug.apk  # Your APK file
-        adb install tcpdump.apk    # For network monitoring
-        adb install scrcpy.apk     # For screen mirroring
 
-    - name: Start network monitoring
+    - name: Start services and monitoring
       run: |
-        adb shell tcpdump -i any -s 0 -w /sdcard/network.pcap &
-        echo "Network monitoring started"
-
-    - name: Setup web access
-      run: |
-        # Install noVNC and websockify
-        brew install novnc websockify
+        # Start tcpdump
+        adb shell "su -c 'tcpdump -i any -s 0 -w /sdcard/network.pcap &'"
         
-        # Start scrcpy with websocket
+        # Setup port forwarding
         adb forward tcp:8888 localabstract:scrcpy
+        
+        # Install and start web services
+        brew install novnc websockify
         websockify --web /usr/local/share/novnc 6080 localhost:8888 &
-        
-        # Start HTTP server for network logs
-        adb pull /sdcard/network.pcap
         python3 -m http.server 8000 &
-        
-        echo "Web interface available at: http://localhost:6080/vnc.html"
-        echo "Network logs available at: http://localhost:8000/network.pcap"
 
-    - name: Keep alive for debugging
+    - name: Wait for connections
       run: |
-        echo "The emulator will remain active for 30 minutes for debugging"
+        echo "Emulator is ready for connection"
+        echo "VNC Web URL: http://localhost:6080/vnc.html"
+        echo "Network logs: http://localhost:8000/network.pcap"
+        echo "Maintaining connection for 30 minutes..."
         sleep 1800
