@@ -70,7 +70,7 @@ jobs:
         sudo gpasswd -a runner kvm
         sudo chown root:kvm /dev/kvm || true
         sudo chmod 660 /dev/kvm || true
-        # Verify KVM setup
+        # Verify KVM setup (log result, proceed with software rendering if failed)
         if ! ls -l /dev/kvm | grep -q "kvm"; then
           echo "KVM setup failed, proceeding with software rendering"
         else
@@ -87,15 +87,23 @@ jobs:
         force-avd-creation: true
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off
         disable-animations: true
-        timeout-minutes: 15
+        emulator-boot-timeout: 900  # 15 minutes in seconds
         script: |
           echo "Waiting for emulator to boot..."
           adb wait-for-device
+          # Retry boot check for up to 5 minutes
+          for i in {1..30}; do
+            if adb shell getprop sys.boot_completed | grep -q "1"; then
+              echo "Emulator booted successfully with API 30"
+              break
+            fi
+            echo "Boot check $i/30: Emulator not yet booted, waiting 10 seconds..."
+            sleep 10
+          done
           if ! adb shell getprop sys.boot_completed | grep -q "1"; then
-            echo "Emulator failed to boot"
+            echo "Emulator failed to boot after 5 minutes"
             exit 1
           fi
-          echo "Emulator booted successfully with API 30"
 
     - name: Push WebAssembly to Emulator
       run: |
