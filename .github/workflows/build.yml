@@ -22,6 +22,13 @@ jobs:
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
+      with:
+        cmdline-tools: 'latest'
+        build-tools: '34.0.0'
+        platform-tools: 'latest'
+        platforms: 'android-30'
+        emulator: 'latest'
+        ndk: 'none'
 
     - name: Install system image
       run: |
@@ -30,24 +37,51 @@ jobs:
 
     - name: Create and configure AVD
       run: |
+        # Verify the system image exists
+        if [ ! -d "$ANDROID_SDK_ROOT/system-images/android-30/google_apis/x86_64" ]; then
+          echo "System image not found!"
+          exit 1
+        fi
+        
+        # Create AVD directory structure
+        mkdir -p "$HOME/.android/avd/test.avd/"
+        
+        # Create the AVD
         echo "no" | avdmanager create avd \
+          --force \
           --name test \
           --package "system-images;android-30;google_apis;x86_64" \
           --abi "x86_64" \
           --device "pixel_4"
         
-        # Configure AVD for better performance
-        echo "hw.ramSize=2048" >> ~/.android/avd/test.avd/config.ini
-        echo "hw.gpu.enabled=yes" >> ~/.android/avd/test.avd/config.ini
-        echo "hw.gpu.mode=auto" >> ~/.android/avd/test.avd/config.ini
-        echo "hw.keyboard=yes" >> ~/.android/avd/test.avd/config.ini
-        echo "vm.heapSize=256" >> ~/.android/avd/test.avd/config.ini
+        # Verify AVD creation
+        if [ ! -f "$HOME/.android/avd/test.avd/config.ini" ]; then
+          echo "AVD creation failed!"
+          exit 1
+        fi
+        
+        # Configure AVD
+        {
+          echo "hw.ramSize=2048"
+          echo "hw.gpu.enabled=yes"
+          echo "hw.gpu.mode=auto"
+          echo "hw.keyboard=yes"
+          echo "vm.heapSize=256"
+          echo "disk.dataPartition.size=2G"
+        } >> "$HOME/.android/avd/test.avd/config.ini"
+        
+        echo "AVD created and configured successfully"
 
-    - name: Start emulator with KVM
+    - name: Setup KVM acceleration
       run: |
+        sudo apt-get -qq update
         sudo apt-get -qq install qemu-kvm
         sudo chmod 777 /dev/kvm
-        
+        groups
+        echo "KVM setup complete"
+
+    - name: Start emulator
+      run: |
         $ANDROID_SDK_ROOT/emulator/emulator \
           -avd test \
           -no-window \
@@ -58,7 +92,12 @@ jobs:
           -writable-system \
           -qemu -m 2048 -enable-kvm &
         
+        # Wait for device to be ready
         adb wait-for-device
+        while [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
+          sleep 5
+          echo "Waiting for emulator to boot..."
+        done
         echo "Emulator started successfully"
 
     - name: Root the emulator
@@ -68,6 +107,10 @@ jobs:
         adb shell avbctl disable-verification
         adb reboot
         adb wait-for-device
+        while [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
+          sleep 5
+          echo "Waiting for emulator to reboot..."
+        done
         adb root
         adb remount
         echo "Emulator rooted successfully"
@@ -78,6 +121,7 @@ jobs:
         adb install app-debug.apk
         
         # Install monitoring tools
+        curl -L https://github.com/Example/tcpdump/releases/download/v1.0/tcpdump -o tcpdump
         adb push tcpdump /data/local/tmp/tcpdump
         adb shell chmod +x /data/local/tmp/tcpdump
         
@@ -85,6 +129,20 @@ jobs:
         adb shell /data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &
         
         echo "Network monitoring started"
+
+    - name: Setup web access
+      run: |
+        # Install required tools
+        sudo apt-get -qq install scrcpy websockify novnc
+        
+        # Start scrcpy server
+        adb forward tcp:8888 localabstract:scrcpy
+        
+        # Start websockify and noVNC
+        websockify --web /usr/share/novnc 6080 localhost:8888 &
+        
+        echo "Web interface available at: http://localhost:6080/vnc.html"
+        echo "Network logs available at: /sdcard/network.pcap"
 
     - name: Keep alive
       run: |
