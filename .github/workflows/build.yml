@@ -26,14 +26,27 @@ jobs:
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
         unzip -q cmdline-tools.zip -d $ANDROID_HOME
         mv $ANDROID_HOME/cmdline-tools $ANDROID_HOME/latest
+        # Set environment variables
         echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
         echo "$ANDROID_HOME/latest/bin" >> $GITHUB_PATH
 
     - name: Setup Android SDK
       run: |
-        # Accept licenses and install required components
-        yes | sdkmanager --licenses > /dev/null 2>&1
-        sdkmanager --install "build-tools;35.0.0" "platform-tools" "platforms;android-30" "emulator" "system-images;android-30;default;x86_64" --channel=0 > /dev/null 2>&1
+        # Ensure sdkmanager is executable
+        chmod +x $ANDROID_HOME/latest/bin/sdkmanager
+        
+        # Accept licenses (alternative method to avoid pipe issues)
+        echo "y" | $ANDROID_HOME/latest/bin/sdkmanager --licenses || true
+        
+        # Install required components (verbose output for debugging)
+        $ANDROID_HOME/latest/bin/sdkmanager --install \
+          "build-tools;35.0.0" \
+          "platform-tools" \
+          "platforms;android-30" \
+          "emulator" \
+          "system-images;android-30;default;x86_64" \
+          --channel=0
         echo "Android SDK setup completed"
 
     - name: Enable KVM Permissions
