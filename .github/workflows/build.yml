@@ -20,14 +20,32 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
+    - name: Install Latest Command-Line Tools
+      run: |
+        # Download and install the latest command-line tools (11.0.0 supports schema v4)
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+        unzip -q cmdline-tools.zip -d $ANDROID_HOME
+        mv $ANDROID_HOME/cmdline-tools $ANDROID_HOME/latest
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+        echo "$ANDROID_HOME/latest/bin" >> $GITHUB_PATH
+
     - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      with:
-        cmdline-tools: 'latest'
-        build-tools: '34.0.0'
-        platform-tools: 'latest'
-        platforms: 'android-30'
-        emulator: 'latest'
+      run: |
+        # Accept licenses and install required components
+        yes | sdkmanager --licenses > /dev/null 2>&1
+        sdkmanager --install "build-tools;35.0.0" "platform-tools" "platforms;android-30" "emulator" "system-images;android-30;default;x86_64" --channel=0 > /dev/null 2>&1
+        echo "Android SDK setup completed"
+
+    - name: Enable KVM Permissions
+      run: |
+        # Ensure KVM group exists and add the runner user
+        sudo groupadd -r kvm || true
+        sudo usermod -aG kvm $USER
+        sudo chown root:kvm /dev/kvm
+        sudo chmod 660 /dev/kvm
+        # Verify KVM access
+        ls -l /dev/kvm | grep "kvm" || (echo "KVM setup failed" && exit 1)
+        echo "KVM permissions configured"
 
     - name: Launch Emulator
       uses: reactivecircus/android-emulator-runner@v2
@@ -47,24 +65,24 @@ jobs:
 
     - name: Install Magisk for Root
       run: |
-        # Download Magisk (latest stable as of April 2025, e.g., v27.0)
+        # Download Magisk (v27.0 as of April 2025)
         wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk.zip
         unzip Magisk.zip "common/*" -d magisk_files
 
         # Pull ramdisk.img from emulator
-        adb shell "su -c 'dd if=/dev/block/by-name/ramdisk of=/sdcard/ramdisk.img'"
+        adb shell "dd if=/dev/block/by-name/ramdisk of=/sdcard/ramdisk.img"
         adb pull /sdcard/ramdisk.img
 
-        # Patch ramdisk with Magisk (simplified, assumes magiskboot binary usage)
+        # Patch ramdisk with Magisk
         wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot
         chmod +x magiskboot
         ./magiskboot unpack ramdisk.img
         ./magiskboot cpio ramdisk.cpio "add 0750 init magisk_files/common/magiskinit"
         ./magiskboot repack ramdisk.img ramdisk-patched.img
 
-        # Push patched ramdisk back and reboot
+        # Push patched ramdisk and reboot
         adb push ramdisk-patched.img /sdcard/ramdisk.img
-        adb shell "su -c 'dd if=/sdcard/ramdisk.img of=/dev/block/by-name/ramdisk'"
+        adb shell "dd if=/sdcard/ramdisk.img of=/dev/block/by-name/ramdisk"
         adb reboot
         adb wait-for-device
 
@@ -75,28 +93,28 @@ jobs:
 
     - name: Install Root Tools and Verify
       run: |
-        # Install Magisk Manager (optional for CI, but useful for debugging)
+        # Install Magisk Manager (optional)
         adb install Magisk.zip
-        adb shell "su -c 'magisk --daemon' &"
+        adb shell "magisk --daemon &"
 
         # Verify root persistence
-        adb shell "su -c 'setprop persist.sys.root_access 1'"
+        adb shell "setprop persist.sys.root_access 1"
         adb shell "su -c 'whoami'" | grep "root" || (echo "Root setup failed" && exit 1)
         echo "Root tools installed and verified"
 
     - name: Install and Monitor Apps
       run: |
-        # Install your APK (assumes app-debug.apk is in repo root)
+        # Install your APK (assumes app-debug.apk in repo root)
         adb install app-debug.apk || (echo "APK installation failed" && exit 1)
 
-        # Install tcpdump for network monitoring
+        # Install tcpdump
         wget -q https://github.com/the-tcpdump-group/tcpdump/releases/download/tcpdump-4.99.4/tcpdump -O tcpdump
         adb push tcpdump /data/local/tmp/
-        adb shell "su -c 'chmod 0755 /data/local/tmp/tcpdump'"
+        adb shell "chmod 0755 /data/local/tmp/tcpdump"
 
         # Start network monitoring
-        adb shell "su -c '/data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &'"
-        sleep 5  # Give it time to start
+        adb shell "/data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &"
+        sleep 5
         adb shell "ls /sdcard/network.pcap" || (echo "Network capture failed to start" && exit 1)
         echo "Network monitoring started"
 
@@ -104,7 +122,7 @@ jobs:
       env:
         NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
       run: |
-        # Install required tools
+        # Install tools
         sudo apt-get update && sudo apt-get install -y scrcpy websockify novnc
 
         # Start scrcpy server
@@ -118,20 +136,20 @@ jobs:
         tar -xzf ngrok-v3-stable-linux-amd64.tgz
         ./ngrok authtoken $NGROK_AUTH_TOKEN
         ./ngrok http 6080 --log=stdout > ngrok.log &
-        sleep 5  # Wait for ngrok to start
+        sleep 5
 
-        # Extract and display public URL
+        # Extract public URL
         NGROK_URL=$(grep -o "https://[0-9a-z-]*\.ngrok-free.app" ngrok.log)
         echo "VNC Web URL: $NGROK_URL/vnc.html"
-        echo "Access the emulator via the URL above during the CI run"
+        echo "Access the emulator via the URL above"
 
     - name: Keep Alive with Health Monitoring
       run: |
-        echo "Rooted emulator is running for 30 minutes with health checks"
+        echo "Rooted emulator running for 30 minutes with health checks"
         echo "Network logs: /sdcard/network.pcap"
         echo "Use 'adb pull /sdcard/network.pcap' to retrieve logs"
 
-        # Health check loop for 30 minutes (1800 seconds)
+        # Health check loop for 30 minutes
         for i in {1..30}; do
           adb shell getprop | grep "ro.build.version.sdk" || (echo "Emulator failed at minute $i" && exit 1)
           adb shell "su -c 'whoami'" | grep "root" || (echo "Root access lost at minute $i" && exit 1)
