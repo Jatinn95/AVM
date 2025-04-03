@@ -17,7 +17,7 @@ jobs:
     - name: Set up JDK
       uses: actions/setup-java@v3
       with:
-        distribution: 'temurin'  # Added required distribution
+        distribution: 'temurin'
         java-version: '17'
 
     - name: Setup Android SDK
@@ -28,55 +28,63 @@ jobs:
       id: emulator
       with:
         api-level: 30
-        arch: x86_64
+        arch: arm64-v8a  # Changed to ARM64 for Apple Silicon compatibility
         profile: "Nexus 5X"
         force-avd-creation: true
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -read-only -writable-system
         disable-animations: true
         script: |
+          echo "Waiting for emulator to boot..."
+          adb wait-for-device
           echo "Rooting emulator..."
           adb root
           adb remount
           adb shell avbctl disable-verification
           adb reboot
-          sleep 30
+          echo "Waiting for reboot..."
+          adb wait-for-device
           adb root
           adb remount
-          adb push superuser.apk /system/app/
-          adb shell settings put global package_verifier_enable 0
           echo "Emulator rooted"
 
-    - name: Install required files
+    - name: Install SuperSU
       run: |
-        # Download necessary files
-        wget https://example.com/superuser.apk  # Replace with actual SuperSU or Magisk
-        wget https://example.com/tcpdump.apk
-        wget https://example.com/scrcpy.apk
+        # Download and install SuperSU
+        wget https://github.com/Chainfire/SuperSU/raw/master/arm64/supersu.zip -O supersu.zip
+        unzip supersu.zip
+        adb push arm64/su /system/xbin/su
+        adb shell chmod 0755 /system/xbin/su
+        adb shell su --install
+        adb shell su --daemon&
+        adb install Superuser.apk
 
     - name: Install APKs
       run: |
-        adb install superuser.apk
+        adb install app-debug.apk
         adb install tcpdump.apk
         adb install scrcpy.apk
-        adb install app-debug.apk  # Your APK file
 
-    - name: Start services and monitoring
+    - name: Start network monitoring
       run: |
-        # Start tcpdump
-        adb shell "su -c 'tcpdump -i any -s 0 -w /sdcard/network.pcap &'"
-        
-        # Setup port forwarding
-        adb forward tcp:8888 localabstract:scrcpy
-        
-        # Install and start web services
+        adb shell su -c "tcpdump -i any -s 0 -w /sdcard/network.pcap &"
+        echo "Network monitoring started"
+
+    - name: Setup web access
+      run: |
+        # Install noVNC and websockify
         brew install novnc websockify
+        
+        # Start scrcpy with websocket
+        adb forward tcp:8888 localabstract:scrcpy
         websockify --web /usr/local/share/novnc 6080 localhost:8888 &
+        
+        # Start HTTP server for network logs
         python3 -m http.server 8000 &
+        
+        echo "Web interface available at: http://localhost:6080/vnc.html"
+        echo "Network logs available at: http://localhost:8000/network.pcap"
 
-    - name: Wait for connections
+    - name: Keep alive for debugging
       run: |
-        echo "Emulator is ready for connection"
-        echo "VNC Web URL: http://localhost:6080/vnc.html"
-        echo "Network logs: http://localhost:8000/network.pcap"
-        echo "Maintaining connection for 30 minutes..."
+        echo "The emulator will remain active for 30 minutes for debugging"
         sleep 1800
