@@ -20,36 +20,34 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Install Latest Command-Line Tools
-      run: |
-        # Download and install the latest command-line tools (version 11.0.0)
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-        mkdir -p $ANDROID_HOME/cmdline-tools
-        unzip -q cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
-        mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-        # Set environment variables
-        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
-        echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-        echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
-
-    - name: Setup Android SDK
-      run: |
-        # Ensure sdkmanager is executable
-        sudo chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
-        # Accept licenses (keep output visible for debugging)
-        yes | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses || true
-        # List available packages for debugging
-        sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list --verbose > sdk_list.txt
-        cat sdk_list.txt
-        # Install required components with google_apis x86 system image
-        sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --install \
-          "build-tools;35.0.0" \
-          "platform-tools" \
-          "platforms;android-30" \
-          "emulator" \
-          "system-images;android-30;google_apis;x86" \
-          --channel=0
-        echo "Android SDK setup completed"
+    - name: Configure and Run Android Emulator
+      uses: reactivecircus/android-emulator-runner@v2
+      id: emulator
+      with:
+        api-level: 30
+        arch: x86
+        target: google_apis  # Use google_apis instead of default to ensure availability
+        profile: pixel_4
+        force-avd-creation: true
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off
+        disable-animations: true
+        emulator-boot-timeout: 900  # 15 minutes in seconds
+        script: |
+          echo "Waiting for emulator to boot..."
+          adb wait-for-device
+          # Retry boot check for up to 5 minutes
+          for i in {1..30}; do
+            if adb shell getprop sys.boot_completed | grep -q "1"; then
+              echo "Emulator booted successfully with API 30 (x86, google_apis)"
+              break
+            fi
+            echo "Boot check $i/30: Emulator not yet booted, waiting 10 seconds..."
+            sleep 10
+          done
+          if ! adb shell getprop sys.boot_completed | grep -q "1"; then
+            echo "Emulator failed to boot after 5 minutes"
+            exit 1
+          fi
 
     - name: Install Emscripten and Compile WebAssembly
       run: |
@@ -65,48 +63,6 @@ jobs:
         # Verify both files are generated
         ls -l i360.js i360.wasm || (echo "WebAssembly compilation failed" && exit 1)
         echo "WebAssembly compiled successfully (i360.js and i360.wasm generated)"
-
-    - name: Enable KVM Permissions
-      run: |
-        # Attempt KVM setup (optional, as x86 with software rendering doesn't require it)
-        sudo groupadd -r kvm || true
-        sudo gpasswd -a runner kvm
-        sudo chown root:kvm /dev/kvm || true
-        sudo chmod 660 /dev/kvm || true
-        # Log KVM status, but proceed with software rendering
-        if ! ls -l /dev/kvm | grep -q "kvm"; then
-          echo "KVM setup failed, using x86 with software rendering"
-        else
-          echo "KVM permissions configured (not required for x86 with -accel off)"
-        fi
-
-    - name: Launch Emulator
-      uses: reactivecircus/android-emulator-runner@v2
-      id: emulator
-      with:
-        api-level: 30
-        arch: x86  # Matches the google_apis;x86 system image
-        profile: pixel_4
-        force-avd-creation: true
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off
-        disable-animations: true
-        emulator-boot-timeout: 900  # 15 minutes in seconds
-        script: |
-          echo "Waiting for emulator to boot..."
-          adb wait-for-device
-          # Retry boot check for up to 5 minutes
-          for i in {1..30}; do
-            if adb shell getprop sys.boot_completed | grep -q "1"; then
-              echo "Emulator booted successfully with API 30 (x86)"
-              break
-            fi
-            echo "Boot check $i/30: Emulator not yet booted, waiting 10 seconds..."
-            sleep 10
-          done
-          if ! adb shell getprop sys.boot_completed | grep -q "1"; then
-            echo "Emulator failed to boot after 5 minutes"
-            exit 1
-          fi
 
     - name: Push WebAssembly to Emulator
       run: |
@@ -159,7 +115,7 @@ jobs:
 
     - name: Install and Monitor Apps
       run: |
-        # Install APK (assumes app-debug.apk在repo root)
+        # Install APK (assumes app-debug.apk in repo root)
         if ! adb install app-debug.apk; then
           echo "APK installation failed"
           exit 1
