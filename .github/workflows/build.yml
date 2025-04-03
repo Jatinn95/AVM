@@ -29,8 +29,9 @@ jobs:
         platforms: 'android-30'
         emulator: 'latest'
 
-    - name: Launch Rooted Emulator
+    - name: Launch Emulator
       uses: reactivecircus/android-emulator-runner@v2
+      id: emulator
       with:
         api-level: 30
         arch: x86_64
@@ -39,60 +40,102 @@ jobs:
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -enable-kvm
         disable-animations: true
         script: |
-          echo "Starting root process..."
-          adb root
-          adb remount
-          adb shell avbctl disable-verification
-          adb reboot
+          echo "Waiting for emulator to boot..."
           adb wait-for-device
-          adb root
-          adb remount
-          adb shell setprop persist.sys.root_access 1
-          echo "Root access enabled!"
+          adb shell getprop | grep "ro.build.version.sdk" || (echo "Emulator failed to boot" && exit 1)
+          echo "Emulator booted successfully with API 30"
 
-    - name: Install Root Tools
+    - name: Install Magisk for Root
       run: |
-        # Install SuperSU
-        wget https://github.com/Chainfire/SuperSU/raw/master/arm64/su -O su
-        adb push su /system/xbin/su
-        adb shell chmod 0755 /system/xbin/su
-        adb shell su --install
-        adb shell su --daemon&
+        # Download Magisk (latest stable as of April 2025, e.g., v27.0)
+        wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk.zip
+        unzip Magisk.zip "common/*" -d magisk_files
 
-        # Verify root
-        adb shell su -c id | grep "uid=0(root)" || echo "Root verification failed"
+        # Pull ramdisk.img from emulator
+        adb shell "su -c 'dd if=/dev/block/by-name/ramdisk of=/sdcard/ramdisk.img'"
+        adb pull /sdcard/ramdisk.img
+
+        # Patch ramdisk with Magisk (simplified, assumes magiskboot binary usage)
+        wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot
+        chmod +x magiskboot
+        ./magiskboot unpack ramdisk.img
+        ./magiskboot cpio ramdisk.cpio "add 0750 init magisk_files/common/magiskinit"
+        ./magiskboot repack ramdisk.img ramdisk-patched.img
+
+        # Push patched ramdisk back and reboot
+        adb push ramdisk-patched.img /sdcard/ramdisk.img
+        adb shell "su -c 'dd if=/sdcard/ramdisk.img of=/dev/block/by-name/ramdisk'"
+        adb reboot
+        adb wait-for-device
+
+        # Verify root access
+        adb root
+        adb shell su -c "id" | grep "uid=0(root)" || (echo "Root verification failed" && exit 1)
+        echo "Root access enabled with Magisk!"
+
+    - name: Install Root Tools and Verify
+      run: |
+        # Install Magisk Manager (optional for CI, but useful for debugging)
+        adb install Magisk.zip
+        adb shell "su -c 'magisk --daemon' &"
+
+        # Verify root persistence
+        adb shell "su -c 'setprop persist.sys.root_access 1'"
+        adb shell "su -c 'whoami'" | grep "root" || (echo "Root setup failed" && exit 1)
+        echo "Root tools installed and verified"
 
     - name: Install and Monitor Apps
       run: |
-        # Install your APK
-        adb install app-debug.apk
+        # Install your APK (assumes app-debug.apk is in repo root)
+        adb install app-debug.apk || (echo "APK installation failed" && exit 1)
 
         # Install tcpdump for network monitoring
-        wget https://github.com/example/tcpdump/releases/latest/download/tcpdump -O tcpdump
+        wget -q https://github.com/the-tcpdump-group/tcpdump/releases/download/tcpdump-4.99.4/tcpdump -O tcpdump
         adb push tcpdump /data/local/tmp/
-        adb shell chmod +x /data/local/tmp/tcpdump
+        adb shell "su -c 'chmod 0755 /data/local/tmp/tcpdump'"
 
         # Start network monitoring
-        adb shell su -c "/data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &"
+        adb shell "su -c '/data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &'"
+        sleep 5  # Give it time to start
+        adb shell "ls /sdcard/network.pcap" || (echo "Network capture failed to start" && exit 1)
         echo "Network monitoring started"
 
-    - name: Setup Web Access
+    - name: Setup Web Access with ngrok
+      env:
+        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
       run: |
         # Install required tools
-        sudo apt-get install -y scrcpy websockify novnc
+        sudo apt-get update && sudo apt-get install -y scrcpy websockify novnc
 
         # Start scrcpy server
         adb forward tcp:8888 localabstract:scrcpy
-        
+
         # Start websockify and noVNC
         websockify --web /usr/share/novnc 6080 localhost:8888 &
-        
-        echo "VNC Web URL: http://localhost:6080/vnc.html"
-        echo "Note: For GitHub runners, you'll need ngrok to expose these ports"
 
-    - name: Keep Alive
+        # Install and configure ngrok
+        wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+        tar -xzf ngrok-v3-stable-linux-amd64.tgz
+        ./ngrok authtoken $NGROK_AUTH_TOKEN
+        ./ngrok http 6080 --log=stdout > ngrok.log &
+        sleep 5  # Wait for ngrok to start
+
+        # Extract and display public URL
+        NGROK_URL=$(grep -o "https://[0-9a-z-]*\.ngrok-free.app" ngrok.log)
+        echo "VNC Web URL: $NGROK_URL/vnc.html"
+        echo "Access the emulator via the URL above during the CI run"
+
+    - name: Keep Alive with Health Monitoring
       run: |
-        echo "Rooted emulator is running for 30 minutes"
+        echo "Rooted emulator is running for 30 minutes with health checks"
         echo "Network logs: /sdcard/network.pcap"
         echo "Use 'adb pull /sdcard/network.pcap' to retrieve logs"
-        sleep 1800
+
+        # Health check loop for 30 minutes (1800 seconds)
+        for i in {1..30}; do
+          adb shell getprop | grep "ro.build.version.sdk" || (echo "Emulator failed at minute $i" && exit 1)
+          adb shell "su -c 'whoami'" | grep "root" || (echo "Root access lost at minute $i" && exit 1)
+          echo "Health check passed at minute $i"
+          sleep 60
+        done
+        echo "Emulator ran successfully for 30 minutes"
