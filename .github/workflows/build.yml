@@ -22,7 +22,7 @@ jobs:
 
     - name: Install Latest Command-Line Tools
       run: |
-        # Download and install the latest command-line tools (11.0.0 supports schema v4)
+        # Download and install the latest command-line tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
         mkdir -p $ANDROID_HOME/cmdline-tools
         unzip -q cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
@@ -36,10 +36,8 @@ jobs:
       run: |
         # Ensure sdkmanager is executable
         sudo chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
-        
         # Accept licenses
-        echo "y" | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses || true
-        
+        yes | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses || true
         # Install required components
         sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --install \
           "build-tools;35.0.0" \
@@ -58,7 +56,10 @@ jobs:
         sudo chown root:kvm /dev/kvm
         sudo chmod 660 /dev/kvm
         # Verify KVM access
-        ls -l /dev/kvm | grep "kvm" || (echo "KVM setup failed" && exit 1)
+        if ! ls -l /dev/kvm | grep -q "kvm"; then
+          echo "KVM setup failed"
+          exit 1
+        fi
         echo "KVM permissions configured"
 
     - name: Launch Emulator
@@ -74,35 +75,37 @@ jobs:
         script: |
           echo "Waiting for emulator to boot..."
           adb wait-for-device
-          adb shell getprop | grep "ro.build.version.sdk" || (echo "Emulator failed to boot" && exit 1)
+          if ! adb shell getprop | grep -q "ro.build.version.sdk"; then
+            echo "Emulator failed to boot"
+            exit 1
+          fi
           echo "Emulator booted successfully with API 30"
 
     - name: Install Magisk for Root
       run: |
-        # Download Magisk (v27.0 as of April 2025)
+        # Download Magisk
         wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O Magisk.zip
         unzip Magisk.zip "common/*" -d magisk_files
-
         # Pull ramdisk.img from emulator
         adb shell "dd if=/dev/block/by-name/ramdisk of=/sdcard/ramdisk.img"
         adb pull /sdcard/ramdisk.img
-
         # Patch ramdisk with Magisk
         wget -q https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot
         chmod +x magiskboot
         ./magiskboot unpack ramdisk.img
         ./magiskboot cpio ramdisk.cpio "add 0750 init magisk_files/common/magiskinit"
         ./magiskboot repack ramdisk.img ramdisk-patched.img
-
         # Push patched ramdisk and reboot
         adb push ramdisk-patched.img /sdcard/ramdisk.img
         adb shell "dd if=/sdcard/ramdisk.img of=/dev/block/by-name/ramdisk"
         adb reboot
         adb wait-for-device
-
         # Verify root access
         adb root
-        adb shell su -c "id" | grep "uid=0(root)" || (echo "Root verification failed" && exit 1)
+        if ! adb shell su -c "id" | grep -q "uid=0(root)"; then
+          echo "Root verification failed"
+          exit 1
+        fi
         echo "Root access enabled with Magisk!"
 
     - name: Install Root Tools and Verify
@@ -110,26 +113,32 @@ jobs:
         # Install Magisk Manager (optional)
         adb install Magisk.zip
         adb shell "magisk --daemon &"
-
         # Verify root persistence
         adb shell "setprop persist.sys.root_access 1"
-        adb shell "su -c 'whoami'" | grep "root" || (echo "Root setup failed" && exit 1)
+        if ! adb shell "su -c 'whoami'" | grep -q "root"; then
+          echo "Root setup failed"
+          exit 1
+        fi
         echo "Root tools installed and verified"
 
     - name: Install and Monitor Apps
       run: |
         # Install your APK (assumes app-debug.apk in repo root)
-        adb install app-debug.apk || (echo "APK installation failed" && exit 1)
-
+        if ! adb install app-debug.apk; then
+          echo "APK installation failed"
+          exit 1
+        fi
         # Install tcpdump
         wget -q https://github.com/the-tcpdump-group/tcpdump/releases/download/tcpdump-4.99.4/tcpdump -O tcpdump
         adb push tcpdump /data/local/tmp/
         adb shell "chmod 0755 /data/local/tmp/tcpdump"
-
         # Start network monitoring
         adb shell "/data/local/tmp/tcpdump -i any -s 0 -w /sdcard/network.pcap &"
         sleep 5
-        adb shell "ls /sdcard/network.pcap" || (echo "Network capture failed to start" && exit 1)
+        if ! adb shell "ls /sdcard/network.pcap"; then
+          echo "Network capture failed to start"
+          exit 1
+        fi
         echo "Network monitoring started"
 
     - name: Setup Web Access with ngrok
@@ -138,20 +147,16 @@ jobs:
       run: |
         # Install tools
         sudo apt-get update && sudo apt-get install -y scrcpy websockify novnc
-
         # Start scrcpy server
         adb forward tcp:8888 localabstract:scrcpy
-
         # Start websockify and noVNC
         websockify --web /usr/share/novnc 6080 localhost:8888 &
-
         # Install and configure ngrok
         wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
         tar -xzf ngrok-v3-stable-linux-amd64.tgz
         ./ngrok authtoken $NGROK_AUTH_TOKEN
         ./ngrok http 6080 --log=stdout > ngrok.log &
         sleep 5
-
         # Extract public URL
         NGROK_URL=$(grep -o "https://[0-9a-z-]*\.ngrok-free.app" ngrok.log)
         echo "VNC Web URL: $NGROK_URL/vnc.html"
@@ -162,11 +167,16 @@ jobs:
         echo "Rooted emulator running for 30 minutes with health checks"
         echo "Network logs: /sdcard/network.pcap"
         echo "Use 'adb pull /sdcard/network.pcap' to retrieve logs"
-
         # Health check loop for 30 minutes
         for i in {1..30}; do
-          adb shell getprop | grep "ro.build.version.sdk" || (echo "Emulator failed at minute $i" && exit 1)
-          adb shell "su -c 'whoami'" | grep "root" || (echo "Root access lost at minute $i" && exit 1)
+          if ! adb shell getprop | grep -q "ro.build.version.sdk"; then
+            echo "Emulator failed at minute $i"
+            exit 1
+          fi
+          if ! adb shell "su -c 'whoami'" | grep -q "root"; then
+            echo "Root access lost at minute $i"
+            exit 1
+          fi
           echo "Health check passed at minute $i"
           sleep 60
         done
