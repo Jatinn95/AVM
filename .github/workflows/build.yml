@@ -1,8 +1,9 @@
-name: Build QEMU WebAssembly (.wasm only)
+name: Build QEMU WASM for x86
+
 on: [push]
 
 env:
-  # Centralized environment variables
+  # Centralized environment variables for consistency and easy updates
   EMSDK_VERSION: "3.1.62"
   ARTIFACT_RETENTION_DAYS: 7
   PYTHON_VERSION: "3.11"
@@ -10,10 +11,10 @@ env:
   BUILD_DIR: "${{ github.workspace }}/build"
   STUBS_DIR: "${{ github.workspace }}/stubs"
   LIBS_DIR: "${{ github.workspace }}/emscripten-libs"
-  TOTAL_MEMORY: "512MB"  # Increased from 256MB
+  TOTAL_MEMORY: "512MB"
   OPTIMIZATION_FLAGS: "-O3 -flto"
-  CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__"  # Base flags without STUBS_DIR
-  LDFLAGS: "-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -O3 -flto"
+  BASE_CFLAGS: "-s USE_SDL=2 -DNO_FUTEX=1 -D__EMSCRIPTEN__"
+  BASE_LDFLAGS: "-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s USE_PTHREADS=0 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -O3 -flto"
 
 jobs:
   build-wasm:
@@ -23,24 +24,27 @@ jobs:
     strategy:
       matrix:
         target: ["i386-softmmu", "x86_64-softmmu"]
-    
+      fail-fast: false  # Allow all targets to run even if one fails
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Cache Dependencies
-        uses: actions/cache@v3
         id: cache-deps
+        uses: actions/cache@v3
         with:
           path: |
             ~/.cache/pip
             ${{ env.LIBS_DIR }}
-          key: ${{ runner.os }}-deps-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-deps-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-deps-${{ env.PYTHON_VERSION }}-
 
-      - name: Set Up Python ${{ env.PYTHON_VERSION }}
+      - name: Set Up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"  # Leverage built-in caching for Python dependencies
 
       - name: Install System Dependencies
         run: |
@@ -54,41 +58,39 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install meson packaging
-          meson --version
-          python -c "import packaging; print(packaging.__version__)"
 
       - name: Install Emscripten
-        timeout-minutes: 20
         if: steps.cache-deps.outputs.cache-hit != 'true'
+        timeout-minutes: 20
         run: |
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git
           cd emsdk
-          ./emsdk install $EMSDK_VERSION
-          ./emsdk activate $EMSDK_VERSION
+          ./emsdk install ${{ env.EMSDK_VERSION }}
+          ./emsdk activate ${{ env.EMSDK_VERSION }}
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
-          source ./emsdk_env.sh
-          emcc --version
+          source ./emsdk_env.sh && emcc --version
 
       - name: Setup Emscripten Environment
         run: |
-          source "$EMSDK_PATH/emsdk_env.sh"
-          echo "EMSCRIPTEN=$EMSDK_PATH/upstream/emscripten" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$EMSDK_PATH/upstream/emscripten/cache/sysroot/lib/pkgconfig" >> $GITHUB_ENV
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          echo "EMSCRIPTEN=${{ env.EMSDK_PATH }}/upstream/emscripten" >> $GITHUB_ENV
+          echo "PATH=${{ env.EMSDK_PATH }}/upstream/bin:$PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${{ env.EMSDK_PATH }}/upstream/emscripten/cache/sysroot/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Build Emscripten Libraries
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
-          source "$EMSDK_PATH/emsdk_env.sh"
-          mkdir -p $LIBS_DIR
-          cd $LIBS_DIR
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          mkdir -p ${{ env.LIBS_DIR }}
+          cd ${{ env.LIBS_DIR }}
 
-          # Create cross-compilation file
+          # Cross-compilation configuration
           cat > emscripten-cross.txt << 'EOF'
           [binaries]
-          c = '$EMSCRIPTEN/emcc'
-          cpp = '$EMSCRIPTEN/em++'
-          ar = '$EMSCRIPTEN/emar'
-          strip = '$EMSCRIPTEN/emstrip'
+          c = '${{ env.EMSCRIPTEN }}/emcc'
+          cpp = '${{ env.EMSCRIPTEN }}/em++'
+          ar = '${{ env.EMSCRIPTEN }}/emar'
+          strip = '${{ env.EMSCRIPTEN }}/emstrip'
           pkg-config = 'pkg-config'
 
           [properties]
@@ -101,99 +103,58 @@ jobs:
           endian = 'little'
           EOF
 
-          # Build zlib
+          # Modular library build function
           build_lib() {
-            local url=$1
-            local name=$2
-            local version=$3
-            local configure_args=$4
-            local patches=$5
-
+            local url=$1 name=$2 version=$3 configure_args=$4 patches=$5
             echo "Building $name $version..."
-            wget $url
-            tar -xzf ${name}-${version}.tar.gz
-            cd ${name}-${version}
-            
+            wget -q "$url" -O "${name}-${version}.tar.gz"
+            tar -xzf "${name}-${version}.tar.gz"
+            cd "${name}-${version}"
             [ -n "$patches" ] && eval "$patches"
-            
-            emconfigure ./configure --prefix="$EMSCRIPTEN/cache/sysroot" $configure_args
-            emmake make -j$(nproc) CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" libz.a
+            emconfigure ./configure --prefix="${{ env.EMSCRIPTEN }}/cache/sysroot" $configure_args
+            emmake make -j$(nproc) CFLAGS="${{ env.BASE_CFLAGS }}" LDFLAGS="${{ env.BASE_LDFLAGS }}" lib${name}.a
             emmake make install
             cd ..
           }
 
           build_lib "https://zlib.net/zlib-1.3.1.tar.gz" "zlib" "1.3.1" "--static"
-
-          # Build libffi with patches
           build_lib "https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz" "libffi" "3.4.6" \
             "--disable-builddir --disable-multi-os-directory --disable-shared --enable-static CFLAGS=\"-s USE_PTHREADS=0 -s EXPORT_ALL=1\"" \
-            "sed -i '1i#include <stdlib.h>\n#include <stdbool.h>\n#ifndef __EMSCRIPTEN__' src/tramp.c && \
-             sed -i '\$a#else\n/* Emscripten stubs */\nvoid ffi_tramp_init(void) {}\nvoid *tramp_table_alloc(void) { return NULL; }\nvoid ffi_tramp_free(void *tramp) {}\nbool tramp_table_map(void *table) { return false; }\nvoid tramp_table_unmap(void *table) {}\nvoid ffi_tramp_lock(void) {}\nvoid ffi_tramp_unlock(void) {}\nbool ffi_tramp_init_os(void) { return false; }\n#endif' src/tramp.c"
-
-          # Build pcre2
+            "sed -i '1i#include <stdlib.h>\n#include <stdbool.h>\n#ifndef __EMSCRIPTEN__' src/tramp.c && sed -i '\$a#else\nvoid ffi_tramp_init(void) {}\nvoid *tramp_table_alloc(void) { return NULL; }\nvoid ffi_tramp_free(void *tramp) {}\nbool tramp_table_map(void *table) { return false; }\nvoid tramp_table_unmap(void *table) {}\nvoid ffi_tramp_lock(void) {}\nvoid ffi_tramp_unlock(void) {}\nbool ffi_tramp_init_os(void) { return false; }\n#endif' src/tramp.c"
           build_lib "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz" "pcre2" "10.44" \
             "--disable-shared --enable-static --disable-jit"
 
-          # Build GLib
+          # Build GLib with specific handling
           echo "Building GLib..."
-          wget https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
+          wget -q https://download.gnome.org/sources/glib/2.80/glib-2.80.0.tar.xz
           tar -xf glib-2.80.0.tar.xz
           cd glib-2.80.0
-
-          # Apply patches
-          sed -i "/# res_query()/a\if cc.has_header('emscripten.h')\n  have_res_query = true\n  message('Emscripten detected, skipping res_query() check')\nelse" gio/meson.build
+          sed -i "/# res_query()/a\if cc.has_header('emscripten.h')\n  have_res_query = true\nelse" gio/meson.build
           sed -i "/if not cc.links(res_query_test_full, name : 'res_query()')/a\endif" gio/meson.build
           sed -i 's/gcomp->strncmp_func = strncmp/gcomp->strncmp_func = (GCompletionStrncmpFunc)strncmp/' glib/deprecated/gcompletion.c
-
-          # Create stubs
           cat > emscripten-stubs.c << 'EOF'
           #include <sys/types.h>
           #include <unistd.h>
           #include <errno.h>
-          #include <ffi.h>
-
-          int res_query(const char *dname, int class, int type, unsigned char *answer, int anslen) {
-              errno = ENOSYS;
-              return -1;
-          }
-
-          int posix_spawnp(pid_t *pid, const char *file, const void *file_actions, const void *attrp, char *const argv[], char *const envp[]) {
-              errno = ENOSYS;
-              return -1;
-          }
-
-          /* Stubs for libffi functions missing in Emscripten */
-          void ffi_call(ffi_cif *cif, void (*fn)(void), void *rvalue, void **avalues) {
-              if (rvalue) {
-                  *(int *)rvalue = 0;
-              }
-          }
-
-          ffi_status ffi_prep_cif_machdep(ffi_cif *cif) {
-              return FFI_OK;
-          }
+          int res_query(const char *dname, int class, int type, unsigned char *answer, int anslen) { errno = ENOSYS; return -1; }
+          int posix_spawnp(pid_t *pid, const char *file, const void *file_actions, const void *attrp, char *const argv[], char *const envp[]) { errno = ENOSYS; return -1; }
           EOF
-
-          # Configure and build
-          meson setup build --cross-file ../emscripten-cross.txt --prefix=$EMSCRIPTEN/cache/sysroot \
+          meson setup build --cross-file ../emscripten-cross.txt --prefix="${{ env.EMSCRIPTEN }}/cache/sysroot" \
             --wrap-mode=nofallback -Ddefault_library=static -Dlibmount=disabled -Dselinux=disabled -Dtests=false -Dxattr=false \
-            -Dc_args='-Wno-error -Wno-cast-function-type-mismatch -Wno-unused-parameter -Wno-incompatible-function-pointer-types -Wno-format -Wno-pedantic' \
-            -Dc_link_args='-s USE_PTHREADS=0 -s EXPORTED_FUNCTIONS=["_main"] -s EXPORT_ALL=1'
-
+            -Dc_args='-Wno-error -Wno-cast-function-type-mismatch -Wno-unused-parameter -Wno-incompatible-function-pointer-types' \
+            -Dc_link_args='-s USE_PTHREADS=0'
           cp emscripten-stubs.c glib/
           sed -i "/^[[:space:]]*glib_sources[[:space:]]*=[[:space:]]*\\[\\]/a\glib_sources += ['emscripten-stubs.c']" glib/meson.build
-
           meson compile -C build
           meson install -C build
 
       - name: Fetch QEMU Source
         run: |
-          git clone --depth 1 --branch $QEMU_VERSION https://github.com/qemu/qemu.git || {
-            echo "Tag $QEMU_VERSION not found, fetching tags..."
+          git clone --depth 1 --branch ${{ env.QEMU_VERSION }} https://github.com/qemu/qemu.git || {
+            echo "Tag ${{ env.QEMU_VERSION }} not found, falling back to master..."
             git clone https://github.com/qemu/qemu.git
             cd qemu
-            git fetch --tags
-            git checkout $QEMU_VERSION || git checkout master
+            git checkout master
           }
           cd qemu
           git log -1
@@ -201,86 +162,49 @@ jobs:
       - name: Patch QEMU Source
         run: |
           cd qemu
-          
-          # Configure patches
           sed -i 's/check_cc_bug() {/check_cc_bug() {\n    return 0/' configure
-          sed -i '/uname -s/i\# Force host OS for Emscripten\nhost_os=linux\nbogus_os=no' configure
-          sed -i 's/error_exit "Unrecognized host OS \(.*\)"/if [ "$host_os" = "linux" ]; then echo "Bypassing OS check for Emscripten"; else error_exit "Unrecognized host OS ($1)"; fi/' configure
-          
-          # Meson patches
+          sed -i '/uname -s/i\host_os=linux\nbogus_os=no' configure
+          sed -i 's/error_exit "Unrecognized host OS \(.*\)"/if [ "$host_os" = "linux" ]; then echo "Bypassing OS check"; else error_exit "Unrecognized host OS ($1)"; fi/' configure
           sed -i "/error.*You either need GCC v7.4/i\if cc.has_header('emscripten.h')\n  message('Emscripten detected, skipping version check')\nelse" meson.build
           sed -i '/error.*You either need GCC v7.4/a\endif' meson.build
           sed -i "/appleframeworks_dep = dependency('appleframeworks'/i\if cc.has_header('emscripten.h')\n  appleframeworks_dep = declare_dependency()\nelse" meson.build
           sed -i "/appleframeworks_dep = dependency('appleframeworks'/a\endif" meson.build
-          
-          # Replace memfd.c with a clean version
-          cat > util/memfd.c << 'EOF'
-          #include <errno.h>
-          #include <sys/mman.h>
-          #include <string.h>
-          
-          #ifdef __EMSCRIPTEN__
-          int memfd_create(const char *name, unsigned int flags) {
-              errno = ENOSYS;
-              return -1;
-          }
-          #else
-          #error "memfd_create not supported on this platform without CONFIG_MEMFD"
-          #endif
-          EOF
-          
-          # Fix type consistency - use gsize consistently
+          echo '#include <errno.h>\n#ifdef __EMSCRIPTEN__\nint memfd_create(const char *name, unsigned int flags) { errno = ENOSYS; return -1; }\n#else\n#error "memfd_create not supported"\n#endif' > util/memfd.c
           sed -i 's/size_t len;/gsize len;/' util/oslib-posix.c
           sed -i 's/size_t \*len/gsize *len/' util/oslib-posix.c
 
-      - name: Verify Patches
-        run: |
-          cd qemu
-          grep "gsize len" util/oslib-posix.c || echo "Patch for oslib-posix.c failed!"
-
       - name: Create Stub Headers
         run: |
-          mkdir -p $STUBS_DIR/linux
-          cat > $STUBS_DIR/linux/magic.h << 'EOF'
+          mkdir -p ${{ env.STUBS_DIR }}/linux
+          cat > ${{ env.STUBS_DIR }}/linux/magic.h << 'EOF'
           #ifndef _LINUX_MAGIC_H
           #define _LINUX_MAGIC_H
-          
           #define TMPFS_MAGIC     0x01021994
           #define RAMFS_MAGIC     0x858458f6
           #define EXT4_SUPER_MAGIC 0xEF53
-          
           #endif
           EOF
 
       - name: Create Compiler Wrappers
         run: |
           cd qemu
-          
-          # Generic wrapper function
           create_wrapper() {
-            local compiler=$1
-            local wrapper_name=$2
-            cat > $wrapper_name << EOF
+            local compiler=$1 wrapper_name=$2
+            cat > "$wrapper_name" << EOF
           #!/bin/bash
           args=()
           for arg in "\$@"; do
-              case "\$arg" in
-                  "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits"|"-m64"|"-mcx16")
-                      continue
-                      ;;
-                  *)
-                      args+=("\$arg")
-                      ;;
-              esac
+            case "\$arg" in
+              "-Werror"|"-fno-gcse"|"-Wold-style-definition"|"-Wtype-limits"|"-m64"|"-mcx16") ;;
+              *) args+=("\$arg") ;;
+            esac
           done
-          exec "$EMSCRIPTEN/$compiler" "\${args[@]}"
+          exec "${{ env.EMSCRIPTEN }}/$compiler" "\${args[@]}"
           EOF
-            chmod +x $wrapper_name
+            chmod +x "$wrapper_name"
           }
-          
           create_wrapper "emcc" "emcc-wrapper.sh"
           create_wrapper "em++" "em++-wrapper.sh"
-          
           echo "EMCC_WRAPPER=$(pwd)/emcc-wrapper.sh" >> $GITHUB_ENV
           echo "EMXX_WRAPPER=$(pwd)/em++-wrapper.sh" >> $GITHUB_ENV
 
@@ -291,82 +215,40 @@ jobs:
           CXX: "${{ env.EMXX_WRAPPER }}"
           TARGET_ARCH: ${{ matrix.target == 'i386-softmmu' && 'i386' || 'x86_64' }}
         run: |
-          source "$EMSDK_PATH/emsdk_env.sh"
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          
-          EXTRA_CFLAGS="$CFLAGS -Wno-ignored-optimization-argument -I${{ env.STUBS_DIR }}"
-          
           emconfigure ./configure \
             --python=python3 \
             --target-list="${{ matrix.target }}" \
-            --disable-xen \
-            --disable-user \
-            --disable-linux-user \
-            --disable-bsd-user \
-            --disable-tools \
-            --disable-vnc \
-            --disable-gtk \
+            --disable-xen --disable-user --disable-linux-user --disable-bsd-user \
+            --disable-tools --disable-vnc --disable-gtk \
             --cross-prefix="" \
-            --cc="$CC" \
-            --cxx="$CXX" \
-            --extra-cflags="$EXTRA_CFLAGS" \
-            --extra-ldflags="$LDFLAGS -s TOTAL_MEMORY=$TOTAL_MEMORY -s FORCE_FILESYSTEM=1" \
-            --disable-werror \
-            --disable-stack-protector \
-            --disable-docs || {
-              echo "Configure failed! Dumping logs:"
-              cat config.log
-              cat build/meson-logs/meson-log.txt 2>/dev/null || echo "No meson logs found"
-              exit 1
-            }
+            --cc="$CC" --cxx="$CXX" \
+            --extra-cflags="${{ env.BASE_CFLAGS }} -I${{ env.STUBS_DIR }} -Wno-ignored-optimization-argument" \
+            --extra-ldflags="${{ env.BASE_LDFLAGS }} -s TOTAL_MEMORY=${{ env.TOTAL_MEMORY }} -s FORCE_FILESYSTEM=1" \
+            --disable-werror --disable-stack-protector --disable-docs \
+          || { cat config.log; exit 1; }
           echo "CONFIGURE_SUCCEEDED=true" >> $GITHUB_ENV
 
       - name: Build QEMU WebAssembly
         if: env.CONFIGURE_SUCCEEDED == 'true'
         timeout-minutes: 45
         run: |
-          source "$EMSDK_PATH/emsdk_env.sh"
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          
           ARCH="${{ matrix.target }}"
           ARCH="${ARCH%-softmmu}"
-          
-          # Export updated CFLAGS and LDFLAGS to handle Emscripten-specific compilation
-          export CFLAGS="$CFLAGS -I${{ env.STUBS_DIR }} -DPCRE2_STATIC -Wno-incompatible-pointer-types"
-          export LDFLAGS="$LDFLAGS -s EXPORTED_FUNCTIONS='[_main]'"
-          
-          # Clean previous build artifacts
-          [ -d build ] && rm -rf build
-          
+          export CFLAGS="${{ env.BASE_CFLAGS }} -I${{ env.STUBS_DIR }} -DPCRE2_STATIC"
+          export LDFLAGS="${{ env.BASE_LDFLAGS }} -s EXPORTED_FUNCTIONS='[_main]'"
           emmake make -j$(nproc) V=1 qemu-system-$ARCH \
-            || {
-              echo "Build failed! Checking specific errors..."
-              if grep -q "error: #else after #else" build/*; then
-                echo "Multiple #else directives detected in memfd.c - patch should have fixed this"
-                cat util/memfd.c
-              fi
-              if grep -q "incompatible pointer types" build/*; then
-                echo "Pointer type mismatch detected - CFLAGS updated to suppress"
-              fi
-              echo "Full build log:"
-              cat build/meson-logs/meson-log.txt 2>/dev/null || echo "No meson logs available"
-              exit 1
-            }
-          
-          if [ ! -f "${{ matrix.target }}/qemu-system-$ARCH.wasm" ]; then
-            echo "Error: .wasm file not generated!"
-            ls -lh "${{ matrix.target }}"
-            exit 1
-          fi
+          || { cat build/meson-logs/meson-log.txt 2>/dev/null || echo "No meson logs"; exit 1; }
+          [ -f "${{ matrix.target }}/qemu-system-$ARCH.wasm" ] || { echo "Error: .wasm file not generated!"; exit 1; }
 
       - name: Validate WASM Output
         if: env.CONFIGURE_SUCCEEDED == 'true'
         run: |
           cd qemu/${{ matrix.target }}
-          file qemu-system-*.wasm | grep "WebAssembly" || {
-            echo "Error: Output is not a valid WebAssembly file"
-            exit 1
-          }
+          file qemu-system-*.wasm | grep -q "WebAssembly" || { echo "Error: Not a valid WASM file"; exit 1; }
           echo "WASM file size: $(du -h qemu-system-*.wasm | cut -f1)"
 
       - name: Upload Artifact
@@ -380,6 +262,4 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          rm -rf qemu/build
-          rm -f qemu/*.o
-          rm -f qemu/*.a
+          rm -rf qemu/build qemu/*.o qemu/*.a
