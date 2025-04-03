@@ -38,15 +38,16 @@ jobs:
         sudo chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
         # Accept licenses (keep output visible for debugging)
         yes | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses || true
-        # Update SDK package list
-        sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --update
-        # Install required components with x86 system image
+        # List available packages for debugging
+        sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list --verbose > sdk_list.txt
+        cat sdk_list.txt
+        # Install required components with google_apis x86 system image
         sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME --install \
           "build-tools;35.0.0" \
           "platform-tools" \
           "platforms;android-30" \
           "emulator" \
-          "system-images;android-30;default;x86" \
+          "system-images;android-30;google_apis;x86" \
           --channel=0
         echo "Android SDK setup completed"
 
@@ -84,7 +85,7 @@ jobs:
       id: emulator
       with:
         api-level: 30
-        arch: x86  # Switched to x86 for QEMU2 compatibility on x86_64 host
+        arch: x86  # Matches the google_apis;x86 system image
         profile: pixel_4
         force-avd-creation: true
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -writable-system -qemu -accel off
@@ -158,7 +159,7 @@ jobs:
 
     - name: Install and Monitor Apps
       run: |
-        # Install APK (assumes app-debug.apk in repo root)
+        # Install APK (assumes app-debug.apk在repo root)
         if ! adb install app-debug.apk; then
           echo "APK installation failed"
           exit 1
