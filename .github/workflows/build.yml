@@ -20,52 +20,53 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Setup Android SDK
+    - name: Setup Android environment
+      run: |
+        # Create Android SDK directory
+        mkdir -p ~/android-sdk
+        echo "ANDROID_SDK_ROOT=~/android-sdk" >> $GITHUB_ENV
+
+    - name: Install Android SDK
       uses: android-actions/setup-android@v3
       with:
+        sdk-path: ~/android-sdk
         cmdline-tools: 'latest'
         build-tools: '34.0.0'
         platform-tools: 'latest'
         platforms: 'android-30'
         emulator: 'latest'
-        ndk: 'none'
 
     - name: Install system image
       run: |
-        # Accept licenses first
-        yes | sdkmanager --licenses || true
-        sdkmanager --install "system-images;android-30;google_apis;x86_64"
-        sdkmanager --list
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "system-images;android-30;google_apis;x86_64"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --list
 
     - name: Create Android Virtual Device
       run: |
-        # Create AVD directory if it doesn't exist
+        # Create necessary directories
         mkdir -p ~/.android/avd
+        touch ~/.android/repositories.cfg
 
-        # Create the AVD with more reliable parameters
-        echo "no" | avdmanager create avd \
+        # List available devices
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/avdmanager list device
+
+        # Create AVD with different device profile
+        echo "no" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/avdmanager create avd \
           --force \
-          --name "android-ci" \
+          --name "ci_emulator" \
           --package "system-images;android-30;google_apis;x86_64" \
           --abi "x86_64" \
-          --device "pixel_4"
+          --device "pixel_xl"
 
-        # Verify AVD was created
-        if [ ! -f ~/.android/avd/android-ci.avd/config.ini ]; then
-          echo "AVD configuration file not found!"
-          ls -la ~/.android/avd/
-          exit 1
-        fi
+        # Debug: Show created files
+        echo "AVD directory contents:"
+        ls -la ~/.android/avd/ci_emulator.avd/
 
-        # Configure AVD settings
-        echo "hw.ramSize=2048" >> ~/.android/avd/android-ci.avd/config.ini
-        echo "hw.gpu.enabled=yes" >> ~/.android/avd/android-ci.avd/config.ini
-        echo "hw.gpu.mode=host" >> ~/.android/avd/android-ci.avd/config.ini
-        echo "hw.keyboard=yes" >> ~/.android/avd/android-ci.avd/config.ini
-        echo "vm.heapSize=256" >> ~/.android/avd/android-ci.avd/config.ini
-        echo "disk.dataPartition.size=2G" >> ~/.android/avd/android-ci.avd/config.ini
-
-        echo "AVD created successfully"
+        # Configure AVD
+        echo "hw.ramSize=2048" >> ~/.android/avd/ci_emulator.avd/config.ini
+        echo "hw.gpu.enabled=yes" >> ~/.android/avd/ci_emulator.avd/config.ini
+        echo "hw.gpu.mode=auto" >> ~/.android/avd/ci_emulator.avd/config.ini
+        echo "vm.heapSize=256" >> ~/.android/avd/ci_emulator.avd/config.ini
 
     - name: Setup KVM acceleration
       run: |
@@ -73,46 +74,41 @@ jobs:
         sudo apt-get install -qq qemu-kvm
         sudo chmod 777 /dev/kvm
         groups
-        echo "KVM acceleration ready"
+        echo "KVM status:"
+        kvm-ok || true
 
     - name: Start emulator
       run: |
-        # Start emulator in background
-        nohup $ANDROID_SDK_ROOT/emulator/emulator \
-          -avd android-ci \
+        # Start emulator with verbose logging
+        $ANDROID_SDK_ROOT/emulator/emulator \
+          -avd ci_emulator \
           -no-window \
           -no-audio \
           -no-boot-anim \
-          -gpu host \
+          -gpu auto \
           -accel on \
           -writable-system \
-          -qemu -m 2048 -enable-kvm > /dev/null 2>&1 &
+          -show-kernel \
+          -verbose \
+          -qemu -m 2048 -enable-kvm > emulator.log 2>&1 &
 
-        # Wait for emulator to start
-        adb wait-for-device
-        echo "Emulator started. Waiting for boot completion..."
-        
-        # Wait for boot completion
+        # Wait for device
+        $ANDROID_SDK_ROOT/platform-tools/adb wait-for-device
+        echo "Emulator started. Waiting for boot..."
+
+        # Wait for complete boot
         while true; do
-          boot_completed=$(adb shell getprop sys.boot_completed | tr -d '\r')
-          if [ "$boot_completed" == "1" ]; then
-            break
-          fi
+          boot_completed=$($ANDROID_SDK_ROOT/platform-tools/adb shell getprop sys.boot_completed | tr -d '\r')
+          [ "$boot_completed" = "1" ] && break
           sleep 5
-          echo "Waiting for emulator to boot..."
+          echo "Waiting for boot completion..."
         done
-        
+
         echo "Emulator is ready"
+        $ANDROID_SDK_ROOT/platform-tools/adb devices -l
 
-    - name: Basic device verification
+    - name: Show emulator logs
+      if: always()
       run: |
-        adb shell getprop
-        adb devices -l
-        adb shell settings put global window_animation_scale 0
-        adb shell settings put global transition_animation_scale 0
-        adb shell settings put global animator_duration_scale 0
-
-    - name: Keep emulator running
-      run: |
-        echo "Emulator will stay active for 15 minutes"
-        sleep 900
+        echo "Emulator logs:"
+        cat emulator.log || echo "No emulator logs found"
