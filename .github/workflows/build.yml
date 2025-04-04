@@ -69,15 +69,22 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
+          # First run configure without Meson options to generate build files
           ./configure \
             --target-list=i386-softmmu \
             --enable-tcg-interpreter \
             --disable-xen \
             --enable-sdl \
-            --audio-drv-list= \
-            -- \
-            --cross-file=emscripten_cross.txt || {
-            echo "Configuration failed! Check logs above for details."
+            --audio-drv-list= || {
+            echo "Initial configuration failed! Check logs above for details."
+            exit 1
+          }
+          
+          # Then manually run meson with the cross file
+          meson setup build \
+            --cross-file emscripten_cross.txt \
+            --reconfigure || {
+            echo "Meson configuration failed! Check logs above for details."
             exit 1
           }
           echo "Configuration completed successfully."
@@ -87,20 +94,21 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          emmake make -j2 V=1 \
+          emmake ninja -C build \
+            -j2 \
             CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
             LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js" || {
             echo "Build failed! Check logs above for details."
             exit 1
           }
           echo "Build completed, checking binaries:"
-          ls -la i386-softmmu/qemu-system-i386*
+          ls -la build/i386-softmmu/qemu-system-i386*
         working-directory: .
         timeout-minutes: 25
 
       - name: Verify Output Files
         run: |
-          cd qemu/i386-softmmu
+          cd qemu/build/i386-softmmu
           if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
             echo "Error: Missing or empty qemu-system-i386.js or qemu-system-i386.wasm!"
             ls -la .
@@ -114,7 +122,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-i386
-          path: qemu/i386-softmmu/qemu-system-i386.*
+          path: qemu/build/i386-softmmu/qemu-system-i386.*
           if-no-files-found: error
           retention-days: 7
 
