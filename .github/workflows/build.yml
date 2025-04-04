@@ -44,6 +44,8 @@ jobs:
           echo "Patched configure script to force host_os=linux"
         working-directory: .
 
+  # ... previous steps remain the same ...
+
       - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
@@ -54,13 +56,12 @@ jobs:
             --disable-xen \
             --disable-system \
             --enable-sdl \
-            --audio-drv-list= \
-            --cross-prefix=em- || {
+            --audio-drv-list= || {  # Removed --cross-prefix=em-
             echo "Configuration failed! Check logs above for details."
             exit 1
           }
           echo "Configuration completed successfully."
-          ls -la config-host.mak  # Verify config file exists
+          ls -la config-host.mak
         working-directory: .
 
       - name: Build QEMU
@@ -69,15 +70,14 @@ jobs:
           cd qemu
           emmake make -j2 V=1 \
             CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
-            LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1" || {
+            LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js" || {
             echo "Build failed! Check logs above for details."
             exit 1
           }
           echo "Build completed, checking binaries:"
           ls -la i386-softmmu/qemu-system-i386*
         working-directory: .
-        timeout-minutes: 15
-
+        timeout-minutes: 25  # Increased timeout
       - name: Verify Output Files
         run: |
           cd qemu/i386-softmmu
