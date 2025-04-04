@@ -12,13 +12,8 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 python3-pip libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git
-          # Install a newer version of Meson via pip
-          pip3 install --user meson>=1.5.0
-          # Ensure the user-installed Meson is in PATH
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          meson --version  # Verify the installed version
-        timeout-minutes: 5
+          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git meson
+          echo "Installed build dependencies successfully."
 
       - name: Install Emscripten
         run: |
@@ -30,10 +25,9 @@ jobs:
           source ./emsdk_env.sh
           echo "Emscripten version: $(emcc --version)"
         working-directory: .
-        timeout Ascending: true
         timeout-minutes: 10
 
-      - name: Download QEMU Source
+      - name: Download QEMU Source (Primary Version)
         run: |
           QEMU_VERSION="9.2.0"
           wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz || {
@@ -42,7 +36,15 @@ jobs:
           }
           tar -xf qemu-${QEMU_VERSION}.tar.xz
           mv qemu-${QEMU_VERSION} qemu
+          echo "Downloaded and extracted QEMU ${QEMU_VERSION}."
         timeout-minutes: 10
+
+      - name: Patch QEMU Configure Script
+        run: |
+          cd qemu
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          echo "Patched configure script to force host_os=linux."
+        working-directory: .
 
       - name: Create Meson Cross File for Emscripten
         run: |
@@ -61,39 +63,86 @@ jobs:
           [properties]
           needs_exe_wrapper = true
           EOF
+          echo "Created Meson cross file for Emscripten."
         working-directory: .
 
       - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
+          ./configure \
+            --target-list=i386-softmmu \
+            --enable-tcg-interpreter \
+            --disable-xen \
+            --enable-sdl \
+            --audio-drv-list= || {
+            echo "Initial configuration failed! Check logs above for details."
+            exit 1
+          }
+          
+          if [ ! -d build/pyvenv ]; then
+            echo "Python virtual environment not found, skipping activation."
+          else
+            source build/pyvenv/bin/activate
+          fi
           meson setup build \
             --cross-file emscripten_cross.txt \
-            -Dtarget_list=i386-softmmu \
-            -Dtcg_interpreter=true \
-            -Dxen=disabled \
-            -Dsdl=enabled \
             --reconfigure || {
-              echo "Meson configuration failed! Check logs above for details."
-              exit 1
-            }
+            echo "Meson configuration failed! Check logs above for details."
+            exit 1
+          }
           echo "Configuration completed successfully."
         working-directory: .
-        timeout-minutes: 5
 
-      - name: Build QEMU
+      - name: Build QEMU (Verbose Mode)
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          emmake ninja -C build -j2 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js" || {
-            echo "Build failed! Check logs above for details."
+          if [ -d build/pyvenv ]; then
+            source build/pyvenv/bin/activate
+          fi
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
+          emmake ninja -C build -j2 -v || {
+            echo "Build failed! Falling back to older QEMU version. Check verbose logs above for details."
             exit 1
           }
           echo "Build completed, checking binaries:"
-          find build/ -name "qemu-system-i386*" || echo "No qemu-system-i386 files found!"
-          ls -la build/i386-softmmu/ || echo "i386-softmmu directory not found!"
+          ls -la build/i386-softmmu/qemu-system-i386* || echo "No binaries found yet."
         working-directory: .
         timeout-minutes: 25
+
+      - name: Fallback to Older QEMU Version (6.0.0)
+        if: failure()
+        run: |
+          echo "Attempting fallback build with QEMU 6.0.0..."
+          rm -rf qemu
+          QEMU_VERSION="6.0.0"
+          wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz || {
+            echo "Error: Failed to download qemu-${QEMU_VERSION}.tar.xz."
+            exit 1
+          }
+          tar -xf qemu-${QEMU_VERSION}.tar.xz
+          mv qemu-${QEMU_VERSION} qemu
+          cd qemu
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          ./configure \
+            --target-list=i386-softmmu \
+            --enable-tcg-interpreter \
+            --disable-xen \
+            --enable-sdl \
+            --audio-drv-list=
+          meson setup build --cross-file emscripten_cross.txt --reconfigure
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
+          emmake ninja -C build -j2 -v || {
+            echo "Fallback build failed! Check logs for details."
+            exit 1
+          }
+          echo "Fallback build completed, checking binaries:"
+          ls -la build/i386-softmmu/qemu-system-i386*
+        working-directory: .
 
       - name: Verify Output Files
         run: |
@@ -118,9 +167,10 @@ jobs:
       - name: Cleanup
         run: |
           rm -rf qemu emsdk
-        if: always()
+          echo "Cleaned up temporary files."
 
       - name: Notify Build Status
         if: always()
         run: |
           echo "QEMU WebAssembly build completed with status: ${{ job.status }}"
+          echo "Note: If the build failed, consider checking community projects like https://github.com/atrosinenko/qemujs for additional patches."
