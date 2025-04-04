@@ -1,3 +1,27 @@
+name: Build and Upload WebAssembly Files
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v2
+      with:
+        api-level: 30
+        emulator: true
+
+    - name: Start emulator
+      run: |
+        adb start-server
+        adb wait-for-device
+        adb shell input keyevent 82
+
     - name: Push WebAssembly to Emulator
       run: |
         adb push i360.js /sdcard/
