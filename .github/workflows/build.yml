@@ -104,11 +104,12 @@ jobs:
           export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
           export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
           emmake ninja -C build -j2 -v || {
-            echo "Build failed! Falling back to older QEMU version. Check verbose logs above for details."
+            echo "Build failed! Check verbose logs above for details."
+            ls -la build/i386-softmmu || echo "Directory build/i386-softmmu not found."
             exit 1
           }
-          echo "Build completed, checking binaries:"
-          ls -la build/i386-softmmu/qemu-system-i386* || echo "No binaries found yet."
+          echo "Build completed, checking build directory:"
+          ls -la build/i386-softmmu || echo "Warning: build/i386-softmmu directory missing after build."
         working-directory: .
         timeout-minutes: 25
 
@@ -138,14 +139,20 @@ jobs:
           export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
           emmake ninja -C build -j2 -v || {
             echo "Fallback build failed! Check logs for details."
+            ls -la build/i386-softmmu || echo "Directory build/i386-softmmu not found in fallback."
             exit 1
           }
           echo "Fallback build completed, checking binaries:"
-          ls -la build/i386-softmmu/qemu-system-i386*
+          ls -la build/i386-softmmu
         working-directory: .
 
       - name: Verify Output Files
         run: |
+          if [ ! -d "qemu/build/i386-softmmu" ]; then
+            echo "Error: Directory qemu/build/i386-softmmu does not exist!"
+            ls -la qemu/build || echo "Directory qemu/build not found either."
+            exit 1
+          fi
           cd qemu/build/i386-softmmu
           if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
             echo "Error: Missing or empty qemu-system-i386.js or qemu-system-i386.wasm!"
