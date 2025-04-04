@@ -40,13 +40,6 @@ jobs:
           echo "Downloaded and extracted QEMU ${QEMU_VERSION}."
         timeout-minutes: 10
 
-      - name: Patch QEMU Configure Script
-        run: |
-          cd qemu
-          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          echo "Patched configure script to force host_os=linux."
-        working-directory: .
-
       - name: Create Meson Cross File for Emscripten
         run: |
           mkdir -p qemu
@@ -64,48 +57,32 @@ jobs:
           endian = 'little'
           [properties]
           needs_exe_wrapper = true
+          c_args = ['-s', 'USE_SDL=2', '-s', 'ASSERTIONS=1', '-s', 'SAFE_HEAP=1']
+          link_args = ['-s', 'USE_SDL=2', '-s', 'EXPORTED_FUNCTIONS=["_main"]', '-s', 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap"]', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'WASM=1']
           EOF
           echo "Created Meson cross file for Emscripten."
         working-directory: .
 
-      - name: Configure QEMU for WebAssembly
+      - name: Configure and Build QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           echo "PATH after sourcing emsdk_env.sh: $PATH"
           which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
           emcc --version || { echo "Error: emcc not working"; exit 1; }
           cd qemu
-          ./configure \
-            --cross-prefix=em \
-            --cc=emcc \
-            --cxx=em++ \
-            --target-list=i386-softmmu \
-            --enable-tcg-interpreter \
-            --disable-xen \
-            --enable-sdl \
-            --audio-drv-list= || {
-            echo "Initial configuration failed! Check logs above for details."
-            exit 1
-          }
           meson setup build \
             --cross-file emscripten_cross.txt \
             --buildtype=release \
-            --prefix="$(pwd)/build/i386-softmmu" || {
+            -Dtarget_list=i386-softmmu \
+            -Dtcg_interpreter=true \
+            -Dxen=disabled \
+            -Dsdl=enabled \
+            -Daudio_drv_list='' || {
             echo "Meson configuration failed! Check logs above for details."
+            cat build/meson-logs/meson-log.txt || echo "Meson log file not found."
             exit 1
           }
-          echo "Configuration completed successfully."
-        working-directory: .
-
-      - name: Build QEMU (Verbose Mode)
-        run: |
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          echo "PATH after sourcing emsdk_env.sh: $PATH"
-          which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
-          cd qemu
-          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o build/i386-softmmu/qemu-system-i386.js"
-          emmake ninja -C build -j2 -v || {
+          ninja -C build -v || {
             echo "Build failed! Check verbose logs above for details."
             ls -la build || echo "Directory build not found."
             exit 1
@@ -128,33 +105,23 @@ jobs:
           tar -xf qemu-${QEMU_VERSION}.tar.xz
           mv qemu-${QEMU_VERSION} qemu
           cd qemu
-          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           echo "PATH after sourcing emsdk_env.sh: $PATH"
           which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
           emcc --version || { echo "Error: emcc not working"; exit 1; }
-          ./configure \
-            --cross-prefix=em \
-            --cc=emcc \
-            --cxx=em++ \
-            --target-list=i386-softmmu \
-            --enable-tcg-interpreter \
-            --disable-xen \
-            --enable-sdl \
-            --audio-drv-list= || {
-            echo "Fallback configure failed! Check logs above for details."
-            exit 1
-          }
           meson setup build \
             --cross-file emscripten_cross.txt \
             --buildtype=release \
-            --prefix="$(pwd)/build/i386-softmmu" || {
+            -Dtarget_list=i386-softmmu \
+            -Dtcg_interpreter=true \
+            -Dxen=disabled \
+            -Dsdl=enabled \
+            -Daudio_drv_list='' || {
             echo "Fallback Meson configuration failed! Check logs above for details."
+            cat build/meson-logs/meson-log.txt || echo "Meson log file not found."
             exit 1
           }
-          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o build/i386-softmmu/qemu-system-i386.js"
-          emmake ninja -C build -j2 -v || {
+          ninja -C build -v || {
             echo "Fallback build failed! Check logs for details."
             ls -la build || echo "Directory build not found in fallback."
             exit 1
@@ -162,6 +129,7 @@ jobs:
           echo "Fallback build completed, checking binaries:"
           ls -la build/i386-softmmu
         working-directory: .
+        timeout-minutes: 25
 
       - name: Verify Output Files
         run: |
