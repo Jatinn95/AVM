@@ -55,6 +55,7 @@ jobs:
           cpp = 'em++'
           ar = 'emar'
           ld = 'emcc'
+          strip = 'emstrip'
           [host_machine]
           system = 'emscripten'
           cpu_family = 'wasm'
@@ -71,6 +72,9 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
           ./configure \
+            --cross-prefix=em \
+            --cc=emcc \
+            --cxx=em++ \
             --target-list=i386-softmmu \
             --enable-tcg-interpreter \
             --disable-xen \
@@ -79,15 +83,10 @@ jobs:
             echo "Initial configuration failed! Check logs above for details."
             exit 1
           }
-          
-          if [ ! -d build/pyvenv ]; then
-            echo "Python virtual environment not found, skipping activation."
-          else
-            source build/pyvenv/bin/activate
-          fi
           meson setup build \
             --cross-file emscripten_cross.txt \
-            --reconfigure || {
+            --buildtype=release \
+            --prefix="$(pwd)/build/i386-softmmu" || {
             echo "Meson configuration failed! Check logs above for details."
             exit 1
           }
@@ -98,14 +97,11 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          if [ -d build/pyvenv ]; then
-            source build/pyvenv/bin/activate
-          fi
           export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o build/i386-softmmu/qemu-system-i386.js"
           emmake ninja -C build -j2 -v || {
             echo "Build failed! Check verbose logs above for details."
-            ls -la build/i386-softmmu || echo "Directory build/i386-softmmu not found."
+            ls -la build || echo "Directory build not found."
             exit 1
           }
           echo "Build completed, checking build directory:"
@@ -127,19 +123,25 @@ jobs:
           mv qemu-${QEMU_VERSION} qemu
           cd qemu
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           ./configure \
+            --cross-prefix=em \
+            --cc=emcc \
+            --cxx=em++ \
             --target-list=i386-softmmu \
             --enable-tcg-interpreter \
             --disable-xen \
             --enable-sdl \
             --audio-drv-list=
-          meson setup build --cross-file emscripten_cross.txt --reconfigure
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          meson setup build \
+            --cross-file emscripten_cross.txt \
+            --buildtype=release \
+            --prefix="$(pwd)/build/i386-softmmu"
           export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o build/i386-softmmu/qemu-system-i386.js"
           emmake ninja -C build -j2 -v || {
             echo "Fallback build failed! Check logs for details."
-            ls -la build/i386-softmmu || echo "Directory build/i386-softmmu not found in fallback."
+            ls -la build || echo "Directory build not found in fallback."
             exit 1
           }
           echo "Fallback build completed, checking binaries:"
