@@ -65,29 +65,6 @@ jobs:
           EOF
         working-directory: .
 
-    # ... (previous steps remain unchanged)
-
-      - name: Create Meson cross file for Emscripten
-        run: |
-          mkdir -p qemu
-          cat << EOF > qemu/emscripten_cross.txt
-          [binaries]
-          c = 'emcc'
-          cpp = 'em++'
-          ar = 'emar'
-          ld = 'emcc'
-
-          [host_machine]
-          system = 'emscripten'
-          cpu_family = 'wasm'
-          cpu = 'wasm32'
-          endian = 'little'
-
-          [properties]
-          needs_exe_wrapper = true
-          EOF
-        working-directory: .
-
       - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
@@ -98,12 +75,12 @@ jobs:
             --disable-xen \
             --enable-sdl \
             --audio-drv-list= \
-            --meson-opts="--cross-file=emscripten_cross.txt" || {
+            -- \
+            --cross-file=emscripten_cross.txt || {
             echo "Configuration failed! Check logs above for details."
             exit 1
           }
           echo "Configuration completed successfully."
-          ls -la config-host.mak
         working-directory: .
 
       - name: Build QEMU
@@ -120,6 +97,7 @@ jobs:
           ls -la i386-softmmu/qemu-system-i386*
         working-directory: .
         timeout-minutes: 25
+
       - name: Verify Output Files
         run: |
           cd qemu/i386-softmmu
