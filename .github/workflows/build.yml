@@ -69,7 +69,6 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          # First run configure without Meson options to generate build files
           ./configure \
             --target-list=i386-softmmu \
             --enable-tcg-interpreter \
@@ -80,10 +79,7 @@ jobs:
             exit 1
           }
           
-          # Ensure Meson is in PATH from the virtual environment
           source build/pyvenv/bin/activate
-          
-          # Then manually run meson with the cross file
           meson setup build \
             --cross-file emscripten_cross.txt \
             --reconfigure || {
@@ -98,10 +94,9 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
           source build/pyvenv/bin/activate
-          emmake ninja -C build \
-            -j2 \
-            CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
-            LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js" || {
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
+          emmake ninja -C build -j2 || {
             echo "Build failed! Check logs above for details."
             exit 1
           }
