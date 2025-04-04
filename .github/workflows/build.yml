@@ -12,8 +12,9 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git meson
-          echo "Installed build dependencies successfully."
+          sudo apt-get install -y build-essential python3 python3-pip libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git
+          pip3 install meson>=1.5.0 --user
+          echo "Installed build dependencies and Meson >= 1.5.0 successfully."
 
       - name: Install Emscripten
         run: |
@@ -58,8 +59,9 @@ jobs:
           [properties]
           needs_exe_wrapper = true
           skip_sanity_check = true
+          [built-in options]
           c_args = ['-s', 'USE_SDL=2', '-s', 'ASSERTIONS=1', '-s', 'SAFE_HEAP=1']
-          link_args = ['-s', 'USE_SDL=2', '-s', 'EXPORTED_FUNCTIONS=["_main"]', '-s', 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap"]', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'WASM=1']
+          c_link_args = ['-s', 'USE_SDL=2', '-s', 'EXPORTED_FUNCTIONS=["_main"]', '-s', 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap"]', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'WASM=1']
           EOF
           echo "Created Meson cross file for Emscripten with skip_sanity_check."
         working-directory: .
@@ -70,6 +72,7 @@ jobs:
           echo "PATH after sourcing emsdk_env.sh: $PATH"
           which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
           emcc --version || { echo "Error: emcc not working"; exit 1; }
+          meson --version || { echo "Error: meson not found or not updated"; exit 1; }
           cd qemu
           meson setup build \
             --cross-file emscripten_cross.txt \
@@ -106,10 +109,31 @@ jobs:
           tar -xf qemu-${QEMU_VERSION}.tar.xz
           mv qemu-${QEMU_VERSION} qemu
           cd qemu
+          # Recreate the cross file for the fallback build
+          cat << EOF > emscripten_cross.txt
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          ld = 'emcc'
+          strip = 'emstrip'
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+          [properties]
+          needs_exe_wrapper = true
+          skip_sanity_check = true
+          [built-in options]
+          c_args = ['-s', 'USE_SDL=2', '-s', 'ASSERTIONS=1', '-s', 'SAFE_HEAP=1']
+          c_link_args = ['-s', 'USE_SDL=2', '-s', 'EXPORTED_FUNCTIONS=["_main"]', '-s', 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap"]', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'WASM=1']
+          EOF
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           echo "PATH after sourcing emsdk_env.sh: $PATH"
           which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
           emcc --version || { echo "Error: emcc not working"; exit 1; }
+          meson --version || { echo "Error: meson not found or not updated"; exit 1; }
           meson setup build \
             --cross-file emscripten_cross.txt \
             --buildtype=release \
