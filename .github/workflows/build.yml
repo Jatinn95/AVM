@@ -20,6 +20,7 @@ jobs:
       run: |
         adb start-server
         adb wait-for-device
+        adb devices
         adb shell input keyevent 82
 
     - name: Push WebAssembly to Emulator
