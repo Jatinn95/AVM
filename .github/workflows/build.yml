@@ -44,6 +44,26 @@ jobs:
           echo "Patched configure script to force host_os=linux"
         working-directory: .
 
+      - name: Create Meson cross file for Emscripten
+        run: |
+          mkdir -p qemu
+          cat << EOF > qemu/emscripten_cross.txt
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          ld = 'emcc'
+
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+
+          [properties]
+          needs_exe_wrapper = true
+          EOF
+        working-directory: .
 
       - name: Configure QEMU for WebAssembly
         run: |
@@ -54,7 +74,8 @@ jobs:
             --enable-tcg-interpreter \
             --disable-xen \
             --enable-sdl \
-            --audio-drv-list= || {
+            --audio-drv-list= \
+            --cross-file=emscripten_cross.txt || {
             echo "Configuration failed! Check logs above for details."
             exit 1
           }
@@ -76,6 +97,7 @@ jobs:
           ls -la i386-softmmu/qemu-system-i386*
         working-directory: .
         timeout-minutes: 25
+
       - name: Verify Output Files
         run: |
           cd qemu/i386-softmmu
