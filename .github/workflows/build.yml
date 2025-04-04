@@ -39,39 +39,31 @@ jobs:
           echo "Downloaded and extracted QEMU ${QEMU_VERSION}."
         timeout-minutes: 10
 
-      - name: Create Meson Cross File for Emscripten
+      - name: Patch QEMU Configure Script
         run: |
-          mkdir -p qemu
-          cat << EOF > qemu/emscripten_cross.txt
-          [binaries]
-          c = 'emcc'
-          cpp = 'em++'
-          ar = 'emar'
-          ld = 'emcc'
-          [host_machine]
-          system = 'emscripten'
-          cpu_family = 'wasm'
-          cpu = 'wasm32'
-          endian = 'little'
-          [properties]
-          needs_exe_wrapper = true
-          EOF
-          echo "Created Meson cross file for Emscripten."
+          cd qemu
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          echo "Patched configure script to force host_os=linux."
         working-directory: .
 
       - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          meson setup build \
-            --cross-file emscripten_cross.txt \
-            -Doptimization=2 \
-            -Dtarget_list=i386-softmmu \
-            -Dtcg_interpreter=true \
-            -Dxen=disabled \
-            -Dsdl=enabled \
-            -Daudio_drv_list='' || {
-            echo "Meson configuration failed! Check logs above for details."
+          emconfigure ./configure \
+            --target-list=i386-softmmu \
+            --enable-tcg-interpreter \
+            --disable-xen \
+            --enable-sdl \
+            --audio-drv-list= \
+            --cc=emcc \
+            --cxx=em++ \
+            --ar=emar \
+            --ranlib=emranlib \
+            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
+            --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js" \
+            --cpu=wasm32 || {
+            echo "Configuration failed! Check logs above for details."
             exit 1
           }
           echo "Configuration completed successfully."
@@ -81,10 +73,7 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
-          meson configure build --cross-file emscripten_cross.txt -Dc_args="$CFLAGS" -Dcpp_args="$CFLAGS" -Dc_link_args="$LDFLAGS" -Dcpp_link_args="$LDFLAGS"
-          emmake ninja -C build -j2 -v || {
+          ninja -C build -j2 -v || {
             echo "Build failed! Check verbose logs above for details."
             ls -la build/i386-softmmu || echo "Directory build/i386-softmmu not found."
             exit 1
@@ -107,22 +96,25 @@ jobs:
           tar -xf qemu-${QEMU_VERSION}.tar.xz
           mv qemu-${QEMU_VERSION} qemu
           cd qemu
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          meson setup build \
-            --cross-file ../emscripten_cross.txt \
-            -Doptimization=2 \
-            -Dtarget_list=i386-softmmu \
-            -Dtcg_interpreter=true \
-            -Dxen=disabled \
-            -Dsdl=enabled \
-            -Daudio_drv_list='' || {
-            echo "Meson configuration failed for fallback! Check logs above."
+          emconfigure ./configure \
+            --target-list=i386-softmmu \
+            --enable-tcg-interpreter \
+            --disable-xen \
+            --enable-sdl \
+            --audio-drv-list= \
+            --cc=emcc \
+            --cxx=em++ \
+            --ar=emar \
+            --ranlib=emranlib \
+            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
+            --extra-ldflags="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js" \
+            --cpu=wasm32 || {
+            echo "Fallback configuration failed! Check logs above for details."
             exit 1
           }
-          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
-          meson configure build --cross-file ../emscripten_cross.txt -Dc_args="$CFLAGS" -Dcpp_args="$CFLAGS" -Dc_link_args="$LDFLAGS" -Dcpp_link_args="$LDFLAGS"
-          emmake ninja -C build -j2 -v || {
+          ninja -C build -j2 -v || {
             echo "Fallback build failed! Check logs for details."
             ls -la build/i386-softmmu || echo "Directory build/i386-softmmu not found in fallback."
             exit 1
