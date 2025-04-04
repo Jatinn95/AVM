@@ -87,6 +87,7 @@ jobs:
             --disable-hvf \
             --disable-whpx \
             --disable-spice \
+            -- \
             --cross-file=emscripten_cross.txt || {
             echo "Configuration failed! Check logs above for details."
             exit 1
