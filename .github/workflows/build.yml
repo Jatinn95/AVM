@@ -12,9 +12,8 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 python3-pip libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git
-          pip3 install meson>=1.5.0 --user
-          echo "Installed build dependencies and Meson >= 1.5.0 successfully."
+          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git meson
+          echo "Installed build dependencies successfully."
 
       - name: Install Emscripten
         run: |
@@ -25,7 +24,6 @@ jobs:
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           echo "Emscripten version: $(emcc --version)"
-          which emcc || { echo "Error: emcc not found after installation"; exit 1; }
         working-directory: .
         timeout-minutes: 10
 
@@ -50,7 +48,6 @@ jobs:
           cpp = 'em++'
           ar = 'emar'
           ld = 'emcc'
-          strip = 'emstrip'
           [host_machine]
           system = 'emscripten'
           cpu_family = 'wasm'
@@ -58,41 +55,42 @@ jobs:
           endian = 'little'
           [properties]
           needs_exe_wrapper = true
-          skip_sanity_check = true
-          [built-in options]
-          c_args = ['-s', 'USE_SDL=2', '-s', 'ASSERTIONS=1', '-s', 'SAFE_HEAP=1']
-          c_link_args = ['-s', 'USE_SDL=2', '-s', 'EXPORTED_FUNCTIONS=["_main"]', '-s', 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap"]', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'WASM=1']
           EOF
-          echo "Created Meson cross file for Emscripten with skip_sanity_check."
+          echo "Created Meson cross file for Emscripten."
         working-directory: .
 
-      - name: Configure and Build QEMU for WebAssembly
+      - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          echo "PATH after sourcing emsdk_env.sh: $PATH"
-          which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
-          emcc --version || { echo "Error: emcc not working"; exit 1; }
-          meson --version || { echo "Error: meson not found or not updated"; exit 1; }
           cd qemu
           meson setup build \
             --cross-file emscripten_cross.txt \
-            --buildtype=release \
+            -Doptimization=2 \
             -Dtarget_list=i386-softmmu \
             -Dtcg_interpreter=true \
             -Dxen=disabled \
             -Dsdl=enabled \
             -Daudio_drv_list='' || {
             echo "Meson configuration failed! Check logs above for details."
-            cat build/meson-logs/meson-log.txt || echo "Meson log file not found."
             exit 1
           }
-          ninja -C build -v || {
+          echo "Configuration completed successfully."
+        working-directory: .
+
+      - name: Build QEMU (Verbose Mode)
+        run: |
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          cd qemu
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
+          meson configure build --cross-file emscripten_cross.txt -Dc_args="$CFLAGS" -Dcpp_args="$CFLAGS" -Dc_link_args="$LDFLAGS" -Dcpp_link_args="$LDFLAGS"
+          emmake ninja -C build -j2 -v || {
             echo "Build failed! Check verbose logs above for details."
-            ls -la build || echo "Directory build not found."
+            ls -la build/i386-softmmu || echo "Directory build/i386-softmmu not found."
             exit 1
           }
           echo "Build completed, checking build directory:"
-          ls -la build
+          ls -la build/i386-softmmu || echo "Warning: build/i386-softmmu directory missing after build."
         working-directory: .
         timeout-minutes: 25
 
@@ -109,56 +107,38 @@ jobs:
           tar -xf qemu-${QEMU_VERSION}.tar.xz
           mv qemu-${QEMU_VERSION} qemu
           cd qemu
-          # Recreate the cross file for the fallback build
-          cat << EOF > emscripten_cross.txt
-          [binaries]
-          c = 'emcc'
-          cpp = 'em++'
-          ar = 'emar'
-          ld = 'emcc'
-          strip = 'emstrip'
-          [host_machine]
-          system = 'emscripten'
-          cpu_family = 'wasm'
-          cpu = 'wasm32'
-          endian = 'little'
-          [properties]
-          needs_exe_wrapper = true
-          skip_sanity_check = true
-          [built-in options]
-          c_args = ['-s', 'USE_SDL=2', '-s', 'ASSERTIONS=1', '-s', 'SAFE_HEAP=1']
-          c_link_args = ['-s', 'USE_SDL=2', '-s', 'EXPORTED_FUNCTIONS=["_main"]', '-s', 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap"]', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'WASM=1']
-          EOF
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          echo "PATH after sourcing emsdk_env.sh: $PATH"
-          which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
-          emcc --version || { echo "Error: emcc not working"; exit 1; }
-          meson --version || { echo "Error: meson not found or not updated"; exit 1; }
           meson setup build \
-            --cross-file emscripten_cross.txt \
-            --buildtype=release \
+            --cross-file ../emscripten_cross.txt \
+            -Doptimization=2 \
             -Dtarget_list=i386-softmmu \
             -Dtcg_interpreter=true \
             -Dxen=disabled \
             -Dsdl=enabled \
             -Daudio_drv_list='' || {
-            echo "Fallback Meson configuration failed! Check logs above for details."
-            cat build/meson-logs/meson-log.txt || echo "Meson log file not found."
+            echo "Meson configuration failed for fallback! Check logs above."
             exit 1
           }
-          ninja -C build -v || {
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
+          meson configure build --cross-file ../emscripten_cross.txt -Dc_args="$CFLAGS" -Dcpp_args="$CFLAGS" -Dc_link_args="$LDFLAGS" -Dcpp_link_args="$LDFLAGS"
+          emmake ninja -C build -j2 -v || {
             echo "Fallback build failed! Check logs for details."
-            ls -la build || echo "Directory build not found in fallback."
+            ls -la build/i386-softmmu || echo "Directory build/i386-softmmu not found in fallback."
             exit 1
           }
-          echo "Fallback build completed, checking build directory:"
-          ls -la build
+          echo "Fallback build completed, checking binaries:"
+          ls -la build/i386-softmmu
         working-directory: .
-        timeout-minutes: 25
 
       - name: Verify Output Files
         run: |
-          cd qemu/build
+          if [ ! -d "qemu/build/i386-softmmu" ]; then
+            echo "Error: Directory qemu/build/i386-softmmu does not exist!"
+            ls -la qemu/build || echo "Directory qemu/build not found either."
+            exit 1
+          fi
+          cd qemu/build/i386-softmmu
           if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
             echo "Error: Missing or empty qemu-system-i386.js or qemu-system-i386.wasm!"
             ls -la .
@@ -172,7 +152,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-i386
-          path: qemu/build/qemu-system-i386.*
+          path: qemu/build/i386-softmmu/qemu-system-i386.*
           if-no-files-found: error
           retention-days: 7
 
