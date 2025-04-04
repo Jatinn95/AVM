@@ -24,6 +24,7 @@ jobs:
           echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
           source ./emsdk_env.sh
           echo "Emscripten version: $(emcc --version)"
+          which emcc || { echo "Error: emcc not found after installation"; exit 1; }
         working-directory: .
         timeout-minutes: 10
 
@@ -70,6 +71,9 @@ jobs:
       - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          echo "PATH after sourcing emsdk_env.sh: $PATH"
+          which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
+          emcc --version || { echo "Error: emcc not working"; exit 1; }
           cd qemu
           ./configure \
             --cross-prefix=em \
@@ -96,6 +100,8 @@ jobs:
       - name: Build QEMU (Verbose Mode)
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          echo "PATH after sourcing emsdk_env.sh: $PATH"
+          which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
           cd qemu
           export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
           export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o build/i386-softmmu/qemu-system-i386.js"
@@ -124,6 +130,9 @@ jobs:
           cd qemu
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          echo "PATH after sourcing emsdk_env.sh: $PATH"
+          which emcc || { echo "Error: emcc not found in PATH"; exit 1; }
+          emcc --version || { echo "Error: emcc not working"; exit 1; }
           ./configure \
             --cross-prefix=em \
             --cc=emcc \
@@ -132,11 +141,17 @@ jobs:
             --enable-tcg-interpreter \
             --disable-xen \
             --enable-sdl \
-            --audio-drv-list=
+            --audio-drv-list= || {
+            echo "Fallback configure failed! Check logs above for details."
+            exit 1
+          }
           meson setup build \
             --cross-file emscripten_cross.txt \
             --buildtype=release \
-            --prefix="$(pwd)/build/i386-softmmu"
+            --prefix="$(pwd)/build/i386-softmmu" || {
+            echo "Fallback Meson configuration failed! Check logs above for details."
+            exit 1
+          }
           export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
           export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o build/i386-softmmu/qemu-system-i386.js"
           emmake ninja -C build -j2 -v || {
