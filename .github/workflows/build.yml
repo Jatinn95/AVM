@@ -57,10 +57,11 @@ jobs:
           endian = 'little'
           [properties]
           needs_exe_wrapper = true
+          skip_sanity_check = true
           c_args = ['-s', 'USE_SDL=2', '-s', 'ASSERTIONS=1', '-s', 'SAFE_HEAP=1']
           link_args = ['-s', 'USE_SDL=2', '-s', 'EXPORTED_FUNCTIONS=["_main"]', '-s', 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap"]', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'WASM=1']
           EOF
-          echo "Created Meson cross file for Emscripten."
+          echo "Created Meson cross file for Emscripten with skip_sanity_check."
         working-directory: .
 
       - name: Configure and Build QEMU for WebAssembly
@@ -88,7 +89,7 @@ jobs:
             exit 1
           }
           echo "Build completed, checking build directory:"
-          ls -la build/i386-softmmu || echo "Warning: build/i386-softmmu directory missing after build."
+          ls -la build
         working-directory: .
         timeout-minutes: 25
 
@@ -126,19 +127,14 @@ jobs:
             ls -la build || echo "Directory build not found in fallback."
             exit 1
           }
-          echo "Fallback build completed, checking binaries:"
-          ls -la build/i386-softmmu
+          echo "Fallback build completed, checking build directory:"
+          ls -la build
         working-directory: .
         timeout-minutes: 25
 
       - name: Verify Output Files
         run: |
-          if [ ! -d "qemu/build/i386-softmmu" ]; then
-            echo "Error: Directory qemu/build/i386-softmmu does not exist!"
-            ls -la qemu/build || echo "Directory qemu/build not found either."
-            exit 1
-          fi
-          cd qemu/build/i386-softmmu
+          cd qemu/build
           if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
             echo "Error: Missing or empty qemu-system-i386.js or qemu-system-i386.wasm!"
             ls -la .
@@ -152,7 +148,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-i386
-          path: qemu/build/i386-softmmu/qemu-system-i386.*
+          path: qemu/build/qemu-system-i386.*
           if-no-files-found: error
           retention-days: 7
 
