@@ -69,21 +69,67 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
+          # Disable features not needed for WebAssembly build
           ./configure \
             --target-list=i386-softmmu \
             --enable-tcg-interpreter \
             --disable-xen \
+            --disable-system \
             --enable-sdl \
-            --audio-drv-list= || {
-            echo "Initial configuration failed! Check logs above for details."
-            exit 1
-          }
-          
-          source build/pyvenv/bin/activate
-          meson setup build \
-            --cross-file emscripten_cross.txt \
-            --reconfigure || {
-            echo "Meson configuration failed! Check logs above for details."
+            --audio-drv-list= \
+            --disable-tools \
+            --disable-docs \
+            --disable-guest-agent \
+            --disable-virtfs \
+            --disable-vnc \
+            --disable-curses \
+            --disable-gtk \
+            --disable-vte \
+            --disable-opengl \
+            --disable-virglrenderer \
+            --disable-curl \
+            --disable-blobs \
+            --disable-kvm \
+            --disable-hvf \
+            --disable-whpx \
+            --disable-spice \
+            --disable-rbd \
+            --disable-libiscsi \
+            --disable-libnfs \
+            --disable-smartcard \
+            --disable-usb-redir \
+            --disable-lzo \
+            --disable-snappy \
+            --disable-bzip2 \
+            --disable-gnutls \
+            --disable-nettle \
+            --disable-gcrypt \
+            --disable-crypto-afalg \
+            --disable-qom-cast-debug \
+            --disable-tpm \
+            --disable-libssh \
+            --disable-live-block-migration \
+            --disable-replication \
+            --disable-bochs \
+            --disable-cloop \
+            --disable-dmg \
+            --disable-qcow1 \
+            --disable-vdi \
+            --disable-vvfat \
+            --disable-qed \
+            --disable-parallels \
+            --disable-sheepdog \
+            --disable-capstone \
+            --disable-fdt \
+            --disable-slirp \
+            --disable-vde \
+            --disable-netmap \
+            --disable-l2tpv3 \
+            --disable-libxml2 \
+            --disable-tcg \
+            --disable-tcg-interpreter \
+            --cross-file=emscripten_cross.txt || {
+            echo "Configuration failed! Check logs above for details."
             exit 1
           }
           echo "Configuration completed successfully."
@@ -93,21 +139,20 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          source build/pyvenv/bin/activate
-          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js"
-          emmake ninja -C build -j2 || {
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -o qemu-system-i386.js"
+          emmake make -j2 V=1 || {
             echo "Build failed! Check logs above for details."
             exit 1
           }
           echo "Build completed, checking binaries:"
-          ls -la build/i386-softmmu/qemu-system-i386*
+          ls -la i386-softmmu/qemu-system-i386*
         working-directory: .
         timeout-minutes: 25
 
       - name: Verify Output Files
         run: |
-          cd qemu/build/i386-softmmu
+          cd qemu/i386-softmmu
           if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
             echo "Error: Missing or empty qemu-system-i386.js or qemu-system-i386.wasm!"
             ls -la .
@@ -121,7 +166,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-i386
-          path: qemu/build/i386-softmmu/qemu-system-i386.*
+          path: qemu/i386-softmmu/qemu-system-i386.*
           if-no-files-found: error
           retention-days: 7
 
