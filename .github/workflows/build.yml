@@ -13,6 +13,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git meson
+        timeout-minutes: 5
 
       - name: Install Emscripten
         run: |
@@ -37,14 +38,7 @@ jobs:
           mv qemu-${QEMU_VERSION} qemu
         timeout-minutes: 10
 
-      - name: Patch QEMU Configure Script
-        run: |
-          cd qemu
-          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
-          echo "Patched configure script to force host_os=linux"
-        working-directory: .
-
-      - name: Create Meson cross file for Emscripten
+      - name: Create Meson Cross File for Emscripten
         run: |
           mkdir -p qemu
           cat << EOF > qemu/emscripten_cross.txt
@@ -53,13 +47,11 @@ jobs:
           cpp = 'em++'
           ar = 'emar'
           ld = 'emcc'
-
           [host_machine]
           system = 'emscripten'
           cpu_family = 'wasm'
           cpu = 'wasm32'
           endian = 'little'
-
           [properties]
           needs_exe_wrapper = true
           EOF
@@ -69,50 +61,37 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          ./configure \
-            --target-list=i386-softmmu \
-            --enable-tcg-interpreter \
-            --disable-xen \
-            --enable-sdl \
-            --audio-drv-list= \
-            --disable-docs \
-            --disable-guest-agent \
-            --disable-virtfs \
-            --disable-vnc \
-            --disable-curses \
-            --disable-gtk \
-            --disable-opengl \
-            --disable-virglrenderer \
-            --disable-kvm \
-            --disable-hvf \
-            --disable-whpx \
-            --disable-spice \
-            -- \
-            --cross-file=emscripten_cross.txt || {
-            echo "Configuration failed! Check logs above for details."
-            exit 1
-          }
+          meson setup build \
+            --cross-file emscripten_cross.txt \
+            -Dtarget_list=i386-softmmu \
+            -Dtcg_interpreter=true \
+            -Dxen=disabled \
+            -Dsdl=enabled \
+            --reconfigure || {
+              echo "Meson configuration failed! Check logs above for details."
+              exit 1
+            }
           echo "Configuration completed successfully."
         working-directory: .
+        timeout-minutes: 5
 
       - name: Build QEMU
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
-          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -o qemu-system-i386.js"
-          emmake make -j2 V=1 || {
+          emmake ninja -C build -j2 CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -o qemu-system-i386.js" || {
             echo "Build failed! Check logs above for details."
             exit 1
           }
           echo "Build completed, checking binaries:"
-          ls -la i386-softmmu/qemu-system-i386*
+          find build/ -name "qemu-system-i386*" || echo "No qemu-system-i386 files found!"
+          ls -la build/i386-softmmu/ || echo "i386-softmmu directory not found!"
         working-directory: .
         timeout-minutes: 25
 
       - name: Verify Output Files
         run: |
-          cd qemu/i386-softmmu
+          cd qemu/build/i386-softmmu
           if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
             echo "Error: Missing or empty qemu-system-i386.js or qemu-system-i386.wasm!"
             ls -la .
@@ -126,13 +105,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-wasm-i386
-          path: qemu/i386-softmmu/qemu-system-i386.*
+          path: qemu/build/i386-softmmu/qemu-system-i386.*
           if-no-files-found: error
           retention-days: 7
 
       - name: Cleanup
         run: |
           rm -rf qemu emsdk
+        if: always()
 
       - name: Notify Build Status
         if: always()
