@@ -37,6 +37,13 @@ jobs:
           mv qemu-${QEMU_VERSION} qemu
         timeout-minutes: 10
 
+      - name: Patch QEMU Configure Script
+        run: |
+          cd qemu
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          echo "Patched configure script to force host_os=linux"
+        working-directory: .
+
       - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
