@@ -12,7 +12,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git
+          sudo apt-get install -y build-essential python3 libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git meson
 
       - name: Install Emscripten
         run: |
@@ -80,6 +80,9 @@ jobs:
             exit 1
           }
           
+          # Ensure Meson is in PATH from the virtual environment
+          source build/pyvenv/bin/activate
+          
           # Then manually run meson with the cross file
           meson setup build \
             --cross-file emscripten_cross.txt \
@@ -94,6 +97,7 @@ jobs:
         run: |
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           cd qemu
+          source build/pyvenv/bin/activate
           emmake ninja -C build \
             -j2 \
             CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1" \
