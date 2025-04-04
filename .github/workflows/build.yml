@@ -83,22 +83,10 @@ jobs:
             --disable-gtk \
             --disable-opengl \
             --disable-virglrenderer \
-            --disable-curl \
             --disable-kvm \
             --disable-hvf \
             --disable-whpx \
             --disable-spice \
-            --disable-libiscsi \
-            --disable-libnfs \
-            --disable-smartcard \
-            --disable-usb-redir \
-            --disable-tpm \
-            --disable-libssh \
-            --disable-live-block-migration \
-            --disable-replication \
-            --disable-capstone \
-            --disable-slirp \
-            --disable-fdt \
             --cross-file=emscripten_cross.txt || {
             echo "Configuration failed! Check logs above for details."
             exit 1
