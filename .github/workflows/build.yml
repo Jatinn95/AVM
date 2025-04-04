@@ -44,7 +44,6 @@ jobs:
           echo "Patched configure script to force host_os=linux"
         working-directory: .
 
-  # ... previous steps remain the same ...
 
       - name: Configure QEMU for WebAssembly
         run: |
@@ -54,9 +53,8 @@ jobs:
             --target-list=i386-softmmu \
             --enable-tcg-interpreter \
             --disable-xen \
-            --disable-system \
             --enable-sdl \
-            --audio-drv-list= || {  # Removed --cross-prefix=em-
+            --audio-drv-list= || {
             echo "Configuration failed! Check logs above for details."
             exit 1
           }
@@ -77,7 +75,7 @@ jobs:
           echo "Build completed, checking binaries:"
           ls -la i386-softmmu/qemu-system-i386*
         working-directory: .
-        timeout-minutes: 25  # Increased timeout
+        timeout-minutes: 25
       - name: Verify Output Files
         run: |
           cd qemu/i386-softmmu
