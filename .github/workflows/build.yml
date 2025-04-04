@@ -45,7 +45,6 @@ jobs:
             --target-list=i386-softmmu \
             --enable-tcg-interpreter \
             --disable-xen \
-            --disable-stack-protect \
             --disable-system \
             --enable-sdl \
             --audio-drv-list= \
@@ -53,6 +52,8 @@ jobs:
             echo "Configuration failed! Check logs above for details."
             exit 1
           }
+          echo "Configuration completed successfully."
+          ls -la config-host.mak  # Verify config file exists
         working-directory: .
 
       - name: Build QEMU
