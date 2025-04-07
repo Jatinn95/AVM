@@ -1,22 +1,56 @@
-apply plugin: 'com.android.application'
+// Apply plugins
+plugins {
+    id 'com.android.application' // Standard Android app plugin
+    id 'com.gradle.build-scan' version '3.17.1' // Build Scan plugin for diagnostics
+}
+
+// Build Scan configuration
+buildScan {
+    termsOfServiceUrl = 'https://gradle.com/terms-of-service'
+    termsOfServiceAgree = 'yes'
+}
 
 android {
-    compileSdkVersion 33
+    compileSdk 34 // Update to your target SDK
+
     defaultConfig {
-        applicationId "com.example.networklogger"
-        minSdkVersion 21
-        targetSdkVersion 33
+        applicationId "com.example.networkloggerapp"
+        minSdk 21 // Minimum SDK supported
+        targetSdk 34 // Match compileSdk
         versionCode 1
         versionName "1.0"
     }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+        debug {
+            // Ensure debug builds are configured correctly
+            debuggable true
+        }
+    }
+
+    compileOptions {
+        // Ensure Java compatibility with Gradle 8.7
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 }
 
 dependencies {
+    // Example dependencies - update these to match your project
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+}
+
+// Optional: Task to clean build cache (run with ./gradlew cleanBuildCache)
+task cleanBuildCache(type: Delete) {
+    delete rootProject.buildDir
+    delete fileTree(dir: "${rootProject.rootDir}/.gradle", include: '**/*')
 }
