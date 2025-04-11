@@ -41,7 +41,12 @@ jobs:
         run: |
           cd qemu
           echo "Patching meson.build to allow emcc..."
-          sed -i "/You either need GCC v7.4 or Clang v10.0/ s/and cc.version().version_compare('<10.0')/and cc.version().version_compare('<10.0') and cc.id() != 'emcc'/" meson.build
+          sed -i "/elif cc.id() == 'clang' and cc.version().version_compare('<10.0')/ s/)$/ and cc.id() != 'emcc')/" meson.build || {
+            echo "Error: Failed to patch meson.build!"
+            exit 1
+          }
+          echo "Verifying patch..."
+          grep "elif cc.id() == 'clang'" meson.build
           echo "Creating Emscripten cross-file..."
           cat > emscripten-cross.txt << 'EOF'
           [binaries]
