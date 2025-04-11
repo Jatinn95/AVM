@@ -1,5 +1,5 @@
 name: Build QEMU WebAssembly (Advanced)
-on: [push]  # Line 2: Must be exactly this, no tabs or extra spaces
+on: [push]  # Line 2: Correct syntax, no tabs or extra spaces
 jobs:
   build-qemu-wasm:
     runs-on: ubuntu-latest
@@ -10,8 +10,8 @@ jobs:
 
       - name: Verify Workflow Version
         run: |
-          echo "Running workflow version with meson.build patch (2025-04-11)"
-          echo "WORKFLOW_MARKER=MESON_PATCH_2025_04_11" >> $GITHUB_ENV
+          echo "Running workflow version with sanity check disabled (2025-04-11)"
+          echo "WORKFLOW_MARKER=SANITY_CHECK_DISABLED_2025_04_11" >> $GITHUB_ENV
 
       - name: Install Build Dependencies
         run: |
@@ -50,17 +50,6 @@ jobs:
           echo "Patched configure script to force host_os=linux"
         working-directory: .
 
-      - name: Patch QEMU Meson Build
-        run: |
-          cd qemu
-          sed -i '/run_command.*sanitycheckc_cross/s/run_command.*$/true/' meson.build || {
-            echo "Failed to patch meson.build; checking if already patched"
-            grep "sanitycheckc_cross" meson.build || echo "No sanity check found in meson.build"
-            exit 1
-          }
-          echo "Patched meson.build to skip sanity check execution"
-        working-directory: .
-
       - name: Create Meson Cross File and Wrapper
         run: |
           mkdir -p qemu
@@ -84,6 +73,7 @@ jobs:
           cpp_link_args = ['-m32']
           [properties]
           needs_exe_wrapper = true
+          disable_sanity_check = true
           EOF
           cat << EOF > qemu/node_wrapper.sh
           #!/bin/bash
