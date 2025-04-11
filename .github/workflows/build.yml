@@ -1,5 +1,5 @@
 name: Build QEMU WebAssembly (Advanced)
-on: [push]  # Line 2: Ensure no extra spaces, tabs, or missing brackets
+on: [push]  # Line 2: Must be exactly this, no tabs or extra spaces
 jobs:
   build-qemu-wasm:
     runs-on: ubuntu-latest
