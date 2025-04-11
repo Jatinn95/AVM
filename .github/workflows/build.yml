@@ -66,19 +66,30 @@ jobs:
           EOF
         working-directory: .
 
-      - name: Configure QEMU for WebAssembly
+       - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK }}/emsdk_env.sh"
+          # Verify Emscripten is in PATH
+          which emcc || {
+            echo "Error: emcc not found in PATH after sourcing emsdk_env.sh!"
+            exit 1
+          }
+          emcc --version
           cd qemu
+          # Explicitly set compiler variables
+          export CC=emcc
+          export CXX=em++
           export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
           ./configure \
+            --cc=emcc \
+            --cxx=em++ \
             --target-list=i386-softmmu \
             --enable-tcg-interpreter \
             --disable-xen \
             --enable-sdl \
             --audio-drv-list= \
             --cross-prefix= \
-            --extra-cflags="-s USE_SDL=2" \
+            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1" \
             --extra-ldflags="-s USE_SDL=2" || {
             echo "Configure failed! Check logs above for details."
             exit 1
@@ -94,7 +105,6 @@ jobs:
           echo "Configuration completed successfully."
         working-directory: .
         timeout-minutes: 10
-
       - name: Build QEMU
         run: |
           source "${{ env.EMSDK }}/emsdk_env.sh"
