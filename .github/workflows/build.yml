@@ -30,7 +30,8 @@ jobs:
       - name: Install Build Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git python3 ninja-build libsdl2-dev libpixman-1-dev
+          sudo apt-get install -y build-essential git python3 python3-pip ninja-build libsdl2-dev libpixman-1-dev
+          pip3 install meson==1.5.0
       - name: Download and Extract QEMU
         run: |
           wget https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
@@ -59,11 +60,11 @@ jobs:
           EOF
           echo "Configuring QEMU..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emconfigure ./configure --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
+          emconfigure ./configure --cross-file=emscripten-cross.txt --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
             echo "Error: Configuration failed!"
-            if [ -f config.log ]; then
-              echo "Dumping config.log for debugging..."
-              cat config.log
+            if [ -f build/meson-logs/meson-log.txt ]; then
+              echo "Dumping meson-log.txt for debugging..."
+              cat build/meson-logs/meson-log.txt
             fi
             exit 1
           }
