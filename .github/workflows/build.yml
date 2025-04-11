@@ -58,19 +58,29 @@ jobs:
           cpu = 'wasm32'
           endian = 'little'
           EOF
-          echo "Configuring QEMU..."
+          echo "Configuring QEMU with minimal options..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emconfigure ./configure --cross-file=emscripten-cross.txt --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
-            echo "Error: Configuration failed!"
+          emconfigure ./configure --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
+            echo "Error: Initial configure failed!"
+            if [ -f config.log ]; then
+              echo "Dumping config.log for debugging..."
+              cat config.log
+            fi
+            exit 1
+          }
+          echo "Setting up Meson for cross-compilation..."
+          meson setup build --cross-file emscripten-cross.txt -Db_lto=true -Doptimization=2 || {
+            echo "Error: Meson setup failed!"
             if [ -f build/meson-logs/meson-log.txt ]; then
               echo "Dumping meson-log.txt for debugging..."
               cat build/meson-logs/meson-log.txt
             fi
             exit 1
           }
-          echo "Building with make..."
-          emmake make -j2 V=1 CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
-            echo "Error: Make failed!"
+          echo "Building with ninja..."
+          cd build
+          ninja CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
+            echo "Error: Ninja build failed!"
             exit 1
           }
           echo "Build completed, listing generated files..."
@@ -92,16 +102,16 @@ jobs:
           else
             echo "Warning: qemu-system-i386.js not generated!"
           fi
-          mkdir -p ../qemujs-binaries
+          mkdir -p ../../qemujs-binaries
           echo "Copying generated files..."
-          cp i386-softmmu/qemu-system-i386.js ../qemujs-binaries/ || echo "Warning: No qemu-system-i386.js found."
-          cp i386-softmmu/qemu-system-i386.wasm ../qemujs-binaries/ || {
+          cp i386-softmmu/qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: No qemu-system-i386.js found."
+          cp i386-softmmu/qemu-system-i386.wasm ../../qemujs-binaries/ || {
             echo "Error: Failed to copy qemu-system-i386.wasm!"
             exit 1
           }
-          cp i386-softmmu/*.data ../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
+          cp i386-softmmu/*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
           echo "Listing copied files in qemujs-binaries..."
-          ls -la ../qemujs-binaries
+          ls -la ../../qemujs-binaries
         working-directory: .
 
       - name: Verify Files in Binaries Directory
