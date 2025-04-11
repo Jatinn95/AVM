@@ -46,7 +46,7 @@ jobs:
           echo "Patched configure script to force host_os=linux"
         working-directory: .
 
-      - name: Create Meson Cross File for Emscripten
+      - name: Create Meson Cross File and Wrapper
         run: |
           mkdir -p qemu
           cat << EOF > qemu/emscripten_cross.txt
@@ -56,7 +56,7 @@ jobs:
           ar = 'emar'
           strip = 'emstrip'
           pkgconfig = 'pkg-config'
-          exe_wrapper = 'node'
+          exe_wrapper = '/home/runner/work/AVM/AVM/qemu/node_wrapper.sh'
           [host_machine]
           system = 'emscripten'
           cpu_family = 'wasm'
@@ -70,6 +70,12 @@ jobs:
           [properties]
           needs_exe_wrapper = true
           EOF
+          cat << EOF > qemu/node_wrapper.sh
+          #!/bin/bash
+          node --experimental-wasm-threads --experimental-wasm-bulk-memory "\$@"
+          EOF
+          chmod +x qemu/node_wrapper.sh
+          echo "Created cross file and node wrapper script"
         working-directory: .
 
       - name: Configure QEMU for WebAssembly
@@ -106,6 +112,7 @@ jobs:
             echo "Configure failed! Check logs above for details."
             exit 1
           }
+          # Debug sanity test binary
           meson setup build \
             --cross-file emscripten_cross.txt \
             -Doptimization=2 \
@@ -113,6 +120,8 @@ jobs:
             -Dtarget_bits=32 \
             --reconfigure || {
             echo "Meson configuration failed! Check logs above for details."
+            ls -la build/meson-private
+            file build/meson-private/sanitycheckc_cross.exe || echo "Sanity check binary not found"
             cat build/meson-logs/meson-log.txt
             exit 1
           }
