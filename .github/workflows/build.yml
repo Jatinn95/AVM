@@ -40,6 +40,9 @@ jobs:
       - name: Build Qemu.js
         run: |
           cd qemu
+          echo "Patching configure to avoid Meson setup..."
+          sed -i '/meson setup/ s/^/#/' configure  # Comment out Meson invocation
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
           echo "Creating Emscripten cross-file..."
           cat > emscripten-cross.txt << 'EOF'
           [binaries]
@@ -56,8 +59,17 @@ jobs:
           cpu = 'wasm32'
           endian = 'little'
           EOF
-          echo "Setting up Meson for cross-compilation..."
+          echo "Running minimal configure to generate config-host.mak..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          emconfigure ./configure --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
+            echo "Error: Configure failed!"
+            if [ -f config.log ]; then
+              echo "Dumping config.log for debugging..."
+              cat config.log
+            fi
+            exit 1
+          }
+          echo "Setting up Meson for cross-compilation..."
           meson setup build \
             --cross-file emscripten-cross.txt \
             -Dsdl=enabled \
