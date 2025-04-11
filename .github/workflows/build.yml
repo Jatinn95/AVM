@@ -46,6 +46,18 @@ jobs:
           echo "Patched configure script to force host_os=linux"
         working-directory: .
 
+      - name: Patch QEMU Meson Build
+        run: |
+          cd qemu
+          # Patch meson.build to skip sanity check execution for Emscripten
+          sed -i '/run_command.*sanitycheckc_cross/s/run_command.*$/true/' meson.build || {
+            echo "Failed to patch meson.build; checking if already patched"
+            grep "sanitycheckc_cross" meson.build || echo "No sanity check found in meson.build"
+            exit 1
+          }
+          echo "Patched meson.build to skip sanity check execution"
+        working-directory: .
+
       - name: Create Meson Cross File and Wrapper
         run: |
           mkdir -p qemu
@@ -69,7 +81,6 @@ jobs:
           cpp_link_args = ['-m32']
           [properties]
           needs_exe_wrapper = true
-          skip_sanity_check = true
           EOF
           cat << EOF > qemu/node_wrapper.sh
           #!/bin/bash
