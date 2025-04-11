@@ -48,31 +48,22 @@ jobs:
           mkdir -p ${{ env.BUILD_DIR }}
           cd ${{ env.BUILD_DIR }}
           
-          # Source Emscripten environment
-          source $EMSDK/emsdk_env.sh
+          # Source Emscripten environment properly
+          source "$EMSDK/emsdk_env.sh"
+          echo "Emscripten path: $(which emcc)"
           
-          # Create Emscripten cross-compilation file
-          cat > emscripten-cross.txt << 'EOF'
-          [binaries]
-          c = '$EMSDK/upstream/emscripten/emcc'
-          cpp = '$EMSDK/upstream/emscripten/em++'
-          ar = '$EMSDK/upstream/emscripten/emar'
-          strip = '$EMSDK/upstream/emscripten/emstrip'
-          pkg-config = 'pkg-config'
+          # Create symlinks to ensure QEMU's build system finds the compilers
+          ln -sf "$(which emcc)" emgcc
+          ln -sf "$(which em++)" emg++
+          export PATH="$PWD:$PATH"
           
-          [properties]
-          needs_exe_wrapper = true
-          
-          [host_machine]
-          system = 'emscripten'
-          cpu_family = 'wasm'
-          cpu = 'wasm32'
-          endian = 'little'
-          EOF
-          
-          # First run configure with proper environment
+          # Configure QEMU with explicit compiler paths
           ../qemu-src/configure \
-            --cross-prefix=em \
+            --cc="$(which emcc)" \
+            --cxx="$(which em++)" \
+            --ar="$(which emar)" \
+            --nm="$(which emnm)" \
+            --strip="$(which emstrip)" \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
@@ -87,13 +78,12 @@ jobs:
             --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
             --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
           
-          # Then build with ninja
+          # Build with ninja
           ninja -v
           
           # Verify the build output
           if [ -f "qemu-system-i386" ]; then
             echo "QEMU i386 build successful"
-            # Add WASM extension for clarity
             mv qemu-system-i386 qemu-system-i386.wasm
             ls -lh qemu-system-i386.wasm
           else
@@ -104,13 +94,10 @@ jobs:
       - name: Prepare Distribution Package
         run: |
           mkdir -p ${{ env.OUTPUT_DIR }}
-          
-          # Copy all necessary files
           cp ${{ env.BUILD_DIR }}/qemu-system-i386.wasm ${{ env.OUTPUT_DIR }}/
           cp ${{ env.BUILD_DIR }}/qemu-system-i386.js ${{ env.OUTPUT_DIR }}/ 2>/dev/null || true
           cp ${{ env.BUILD_DIR }}/*.data ${{ env.OUTPUT_DIR }}/ 2>/dev/null || true
           
-          # Create simple test script
           cat > ${{ env.OUTPUT_DIR }}/test.sh << 'EOF'
           #!/bin/bash
           echo "Testing QEMU WASM build..."
