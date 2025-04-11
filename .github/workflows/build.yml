@@ -1,5 +1,5 @@
 name: Build QEMU WebAssembly (Advanced)
-on: [push]  # Line 2: Valid syntax, triggers on push events
+on: [push]  # Line 2: Ensure no extra spaces, tabs, or missing brackets
 jobs:
   build-qemu-wasm:
     runs-on: ubuntu-latest
