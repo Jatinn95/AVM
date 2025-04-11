@@ -47,7 +47,7 @@ jobs:
           cpp = 'em++'
           ar = 'emar'
           strip = 'emstrip'
-          pkgconfig = 'pkg-config'
+          pkg-config = 'pkg-config'
           [properties]
           needs_exe_wrapper = true
           [host_machine]
@@ -60,7 +60,6 @@ jobs:
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           meson setup build \
             --cross-file emscripten-cross.txt \
-            -Dtarget_list=i386-softmmu \
             -Dsdl=enabled \
             -Dxen=disabled \
             -Dkvm=disabled \
@@ -79,7 +78,7 @@ jobs:
           }
           echo "Building with ninja..."
           cd build
-          ninja CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
+          ninja i386-softmmu/qemu-system-i386 CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
             echo "Error: Ninja build failed!"
             exit 1
           }
