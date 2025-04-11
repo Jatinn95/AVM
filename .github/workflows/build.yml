@@ -1,5 +1,5 @@
 name: Build QEMU WebAssembly (Advanced)
-on: [push]  # Line 2: Must be exactly this, no tabs or extra spaces
+on: [push]  # Line 2: Correct syntax, no tabs or extra spaces
 jobs:
   build-qemu-wasm:
     runs-on: ubuntu-latest
@@ -73,7 +73,7 @@ jobs:
           cpp_link_args = ['-m32']
           [properties]
           needs_exe_wrapper = true
-          disable_sanity_check = true
+          skip_sanity_check = true
           EOF
           cat << EOF > qemu/node_wrapper.sh
           #!/bin/bash
