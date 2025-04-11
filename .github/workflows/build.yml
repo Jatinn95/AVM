@@ -12,7 +12,6 @@ jobs:
       - name: Verify Workflow Version
         run: |
           echo "Running workflow version with meson.build patch (2025-04-11)"
-          # Add a unique marker to confirm this workflow is used
           echo "WORKFLOW_MARKER=MESON_PATCH_2025_04_11" >> $GITHUB_ENV
 
       - name: Install Build Dependencies
