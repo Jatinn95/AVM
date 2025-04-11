@@ -174,11 +174,11 @@ jobs:
         working-directory: .
         timeout-minutes: 10
 
-      - name: Install Build Tools
+      - name: Install Build Tools and Python 2
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git python3 ninja-build python3-pip
-          pip3 install meson
+          sudo apt-get install -y build-essential git python2.7 ninja-build libsdl2-dev
+          sudo ln -sf /usr/bin/python2.7 /usr/bin/python
       - name: Fetch and Build Qemu.js with qemujs-builder
         run: |
           echo "Fetching qemujs-builder..."
@@ -201,11 +201,27 @@ jobs:
           cd qemu
           echo "Listing qemu directory contents..."
           ls -la
-          echo "Setting permissions for scripts..."
-          find . -type f -name "*.py" -exec chmod +x {} \;
-          echo "Configuring QEMU directly..."
+          echo "Patching configure script for Emscripten..."
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          echo "Creating Emscripten cross-file..."
+          cat > emscripten-cross.txt << 'EOF'
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          strip = 'emstrip'
+          pkgconfig = 'pkg-config'
+          [properties]
+          needs_exe_wrapper = true
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+          EOF
+          echo "Configuring QEMU..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emconfigure ./configure --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
+          emconfigure ./configure --cross-prefix="" --python=/usr/bin/python2.7 --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
             echo "Error: Configuration failed!"
             if [ -f config.log ]; then
               echo "Dumping config.log for debugging..."
