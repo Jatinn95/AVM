@@ -40,9 +40,6 @@ jobs:
       - name: Build Qemu.js
         run: |
           cd qemu
-          echo "Patching configure to exit after config-host.mak is written..."
-          sed -i '/CONFIG_MAK=\$CONFIG_HOST_MAK/a exit 0' configure  # Exit after config-host.mak is fully written
-          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
           echo "Creating Emscripten cross-file..."
           cat > emscripten-cross.txt << 'EOF'
           [binaries]
@@ -59,22 +56,21 @@ jobs:
           cpu = 'wasm32'
           endian = 'little'
           EOF
-          echo "Running minimal configure to generate config-host.mak..."
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emconfigure ./configure --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
-            echo "Error: Configure failed!"
-            if [ -f config.log ]; then
-              echo "Dumping config.log for debugging..."
-              cat config.log
-            fi
-            exit 1
-          }
-          echo "Verifying config-host.mak..."
-          ls -la build/config-host.mak || {
-            echo "Error: config-host.mak not generated!"
-            exit 1
-          }
+          echo "Creating minimal config-host.mak..."
+          mkdir -p build
+          cat > build/config-host.mak << 'EOF'
+          SRC_PATH=/home/runner/work/AVM/AVM/qemu
+          CONFIG_SDL=y
+          CONFIG_XEN=n
+          CONFIG_KVM=n
+          CONFIG_VNC=n
+          CONFIG_DOCS=n
+          CONFIG_TOOLS=n
+          CONFIG_GUEST_AGENT=n
+          CONFIG_LINUX=y
+          EOF
           echo "Setting up Meson for cross-compilation..."
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
           meson setup build \
             --cross-file emscripten-cross.txt \
             -Dsdl=enabled \
