@@ -66,7 +66,7 @@ jobs:
           EOF
         working-directory: .
 
-       - name: Configure QEMU for WebAssembly
+      - name: Configure QEMU for WebAssembly
         run: |
           source "${{ env.EMSDK }}/emsdk_env.sh"
           # Verify Emscripten is in PATH
@@ -105,6 +105,7 @@ jobs:
           echo "Configuration completed successfully."
         working-directory: .
         timeout-minutes: 10
+
       - name: Build QEMU
         run: |
           source "${{ env.EMSDK }}/emsdk_env.sh"
