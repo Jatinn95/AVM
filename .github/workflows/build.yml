@@ -40,8 +40,8 @@ jobs:
       - name: Build Qemu.js
         run: |
           cd qemu
-          echo "Patching configure to avoid Meson setup..."
-          sed -i '/meson setup/ s/^/#/' configure  # Comment out Meson invocation
+          echo "Patching configure to exit after config-host.mak..."
+          sed -i '/write_configmak/q' configure  # Exit after config-host.mak is written
           sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
           echo "Creating Emscripten cross-file..."
           cat > emscripten-cross.txt << 'EOF'
@@ -67,6 +67,11 @@ jobs:
               echo "Dumping config.log for debugging..."
               cat config.log
             fi
+            exit 1
+          }
+          echo "Verifying config-host.mak..."
+          ls -la build/config-host.mak || {
+            echo "Error: config-host.mak not generated!"
             exit 1
           }
           echo "Setting up Meson for cross-compilation..."
