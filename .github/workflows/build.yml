@@ -42,18 +42,15 @@ jobs:
           cd qemu
           echo "Patching meson.build to allow emcc..."
           echo "Dumping meson.build context for compiler check:"
-          grep -A 10 -B 10 "cc.id() == 'clang'" meson.build || echo "Warning: No clang check found!"
-          sed -i "/cc.id() == 'clang' and cc.version().version_compare/ s/)$/ and cc.id() != 'emcc')/" meson.build || {
-            echo "Error: Initial sed patch failed! Attempting broader patch..."
-            sed -i "/cc.id() == 'clang'/ s/$/ and cc.id() != 'emcc'/" meson.build || {
-              echo "Error: Failed to patch meson.build!"
-              echo "Dumping updated meson.build snippet:"
-              grep -A 10 -B 10 "cc.id() == 'clang'" meson.build
-              exit 1
-            }
+          grep -A 10 -B 10 "cc.get_id() == 'clang'" meson.build || echo "Warning: No clang check found!"
+          sed -i "/cc.get_id() == 'clang' and cc.version().version_compare/ s/)$/ and cc.get_id() != 'emcc')/" meson.build || {
+            echo "Error: Failed to patch meson.build!"
+            echo "Dumping updated meson.build snippet:"
+            grep -A 10 -B 10 "cc.get_id() == 'clang'" meson.build
+            exit 1
           }
           echo "Verifying patch..."
-          grep "cc.id() == 'clang'" meson.build || {
+          grep "cc.get_id() == 'clang'" meson.build || {
             echo "Error: Patch verification failed!"
             exit 1
           }
