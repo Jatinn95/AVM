@@ -52,18 +52,16 @@ jobs:
           source "$EMSDK/emsdk_env.sh"
           echo "Emscripten path: $(which emcc)"
           
-          # Create symlinks to ensure QEMU's build system finds the compilers
-          ln -sf "$(which emcc)" emgcc
-          ln -sf "$(which em++)" emg++
+          # Create symlinks that QEMU expects
+          ln -sf "$(which emcc)" emcc
+          ln -sf "$(which em++)" em++
+          ln -sf "$(which emar)" emar
+          ln -sf "$(which emstrip)" emstrip
           export PATH="$PWD:$PATH"
           
-          # Configure QEMU with explicit compiler paths
+          # Configure QEMU with cross-compilation prefix
           ../qemu-src/configure \
-            --cc="$(which emcc)" \
-            --cxx="$(which em++)" \
-            --ar="$(which emar)" \
-            --nm="$(which emnm)" \
-            --strip="$(which emstrip)" \
+            --cross-prefix=em \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
