@@ -152,7 +152,7 @@ jobs:
   # Build Qemu.js with explicit .wasm file generation and inclusion in artifacts
   prebuilt-qemu-js:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -187,82 +187,70 @@ jobs:
           cat > qemu-link.sh << 'EOF'
           #!/bin/bash
           source "${EMSDK_PATH}/emsdk_env.sh"
-          emcc -s WASM=1 -s LINKABLE=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s ERROR_ON_UNDEFINED_SYMBOLS=1 "$@"
+          emcc -s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s EXPORT_ALL=1 -o qemu-system-i386.js "$@"
+          echo "Linker command executed: emcc -s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s EXPORT_ALL=1 -o qemu-system-i386.js $@"
+          ls -la qemu-system-i386.*
           EOF
           chmod +x qemu-link.sh
           echo "Fetching essential qemu submodule..."
           git submodule update --init qemu || {
-            echo "Submodule update failed, falling back to pre-built binaries..."
-            mkdir -p ../qemujs-binaries
-            wget -O ../qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-              echo "Failed to download pre-built .js binary!"
+            echo "Error: Failed to update qemu submodule!"
+            exit 1
+          }
+          cd qemu
+          echo "Listing qemu directory contents..."
+          ls -la
+          if [ -f "../configure-cmd.sh" ]; then
+            echo "Running configure-cmd.sh from qemu/ directory..."
+            source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+            chmod +x ../configure-cmd.sh
+            ../configure-cmd.sh || {
+              echo "Error: Configuration failed!"
+              if [ -f config.log ]; then
+                echo "Dumping config.log for debugging..."
+                cat config.log
+              fi
               exit 1
             }
-            wget -O ../qemujs-binaries/shell.html https://atrosinenko.github.io/qemujs-demo/shell.html 2>/dev/null || echo "No shell.html downloaded."
-            ls -la ../qemujs-binaries
-            echo "BUILD_SKIPPED=true" >> $GITHUB_ENV
-            exit 0
-          }
-          if [ "${{ env.BUILD_SKIPPED }}" != "true" ]; then
-            cd qemu
-            echo "Listing qemu directory contents..."
-            ls -la
-            if [ -f "../configure-cmd.sh" ]; then
-              echo "Running configure-cmd.sh from qemu/ directory..."
-              source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-              chmod +x ../configure-cmd.sh
-              ../configure-cmd.sh || {
-                echo "Configuration failed! Falling back to pre-built binaries..."
-                mkdir -p ../../qemujs-binaries
-                wget -O ../../qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-                  echo "Failed to download pre-built .js binary!"
-                  exit 1
-                }
-                wget -O ../../qemujs-binaries/shell.html https://atrosinenko.github.io/qemujs-demo/shell.html 2>/dev/null || echo "No shell.html downloaded."
-                echo "BUILD_SKIPPED=true" >> $GITHUB_ENV
-                exit 0
-              }
-              echo "Building with make..."
-              cd build
-              emmake make -j2 CFLAGS="-s WASM=1 -s LINKABLE=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s LINKABLE=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" V=1 || {
-                echo "Make failed! Falling back to pre-built binaries..."
-                mkdir -p ../../../qemujs-binaries
-                wget -O ../../../qemujs-binaries/qemu-system-i386.js https://atrosinenko.github.io/qemujs-demo/qemu-system-i386.js || {
-                  echo "Failed to download pre-built .js binary!"
-                  exit 1
-                }
-                wget -O ../../qemujs-binaries/shell.html https://atrosinenko.github.io/qemujs-demo/shell.html 2>/dev/null || echo "No shell.html downloaded."
-                echo "BUILD_SKIPPED=true" >> $GITHUB_ENV
-                exit 0
-              }
-              echo "Build completed, listing generated files..."
-              ls -la ../qemu-system-* || echo "No qemu-system-* files found."
-              if [ -f "../qemu-system-i386.wasm" ]; then
-                FILE_SIZE=$(stat -f%z ../qemu-system-i386.wasm 2>/dev/null || stat -c%s ../qemu-system-i386.wasm)
-                echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
-                if [ "$FILE_SIZE" -eq 0 ]; then
-                  echo "Error: qemu-system-i386.wasm is empty!"
-                  exit 1
-                fi
-              else
-                echo "Error: qemu-system-i386.wasm not generated!"
+            echo "Building with make..."
+            cd build
+            emmake make -j2 CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1 -s EXPORT_ALL=1" V=1 || {
+              echo "Error: Make failed!"
+              exit 1
+            }
+            echo "Build completed, listing generated files..."
+            ls -la ../qemu-system-* || echo "No qemu-system-* files found."
+            if [ -f "../qemu-system-i386.wasm" ]; then
+              FILE_SIZE=$(stat -f%z ../qemu-system-i386.wasm 2>/dev/null || stat -c%s ../qemu-system-i386.wasm)
+              echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
+              if [ "$FILE_SIZE" -eq 0 ]; then
+                echo "Error: qemu-system-i386.wasm is empty!"
                 exit 1
               fi
-              mkdir -p ../../qemujs-binaries
-              echo "Copying generated files..."
-              cp ../qemu-system-*.js ../../qemujs-binaries/ || echo "Warning: No .js files found."
-              cp ../qemu-system-*.wasm ../../qemujs-binaries/ || {
-                echo "Error: Failed to copy .wasm files!"
-                exit 1
-              }
-              cp ../*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
-              cp ../shell.html ../../qemujs-binaries/ 2>/dev/null || echo "No shell.html found."
-              echo "Listing copied files in qemujs-binaries..."
-              ls -la ../../qemujs-binaries
             else
-              echo "No configure-cmd.sh found in qemujs-builder!"
+              echo "Error: qemu-system-i386.wasm not generated!"
               exit 1
             fi
+            if [ -f "../qemu-system-i386.js" ]; then
+              FILE_SIZE=$(stat -f%z ../qemu-system-i386.js 2>/dev/null || stat -c%s ../qemu-system-i386.js)
+              echo "qemu-system-i386.js size: $FILE_SIZE bytes"
+            else
+              echo "Warning: qemu-system-i386.js not generated!"
+            fi
+            mkdir -p ../../qemujs-binaries
+            echo "Copying generated files..."
+            cp ../qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: No qemu-system-i386.js found."
+            cp ../qemu-system-i386.wasm ../../qemujs-binaries/ || {
+              echo "Error: Failed to copy qemu-system-i386.wasm!"
+              exit 1
+            }
+            cp ../*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
+            cp ../shell.html ../../qemujs-binaries/ 2>/dev/null || echo "No shell.html found."
+            echo "Listing copied files in qemujs-binaries..."
+            ls -la ../../qemujs-binaries
+          else
+            echo "Error: No configure-cmd.sh found in qemujs-builder!"
+            exit 1
           fi
         working-directory: .
 
@@ -282,8 +270,20 @@ jobs:
             echo "Error: qemu-system-i386.wasm not found in qemujs-binaries!"
             exit 1
           fi
-          if [ ! -f "qemu-system-i386.js" ]; then
+          if [ -f "qemu-system-i386.js" ]; then
+            FILE_SIZE=$(stat -f%z qemu-system-i386.js 2>/dev/null || stat -c%s qemu-system-i386.js)
+            echo "qemu-system-i386.js size: $FILE_SIZE bytes"
+          else
             echo "Warning: qemu-system-i386.js not found."
+          fi
+          if [ -f "shell.html" ]; then
+            FILE_SIZE=$(stat -f%z shell.html 2>/dev/null || stat -c%s shell.html)
+            echo "shell.html size: $FILE_SIZE bytes"
+            if [ "$FILE_SIZE" -eq 0 ]; then
+              echo "Warning: shell.html is empty!"
+            fi
+          else
+            echo "Warning: shell.html not found."
           fi
         working-directory: .
 
@@ -310,8 +310,8 @@ jobs:
         with:
           name: qemu-js-prebuilt
           path: |
-            qemujs-binaries/*.js
-            qemujs-binaries/*.wasm
+            qemujs-binaries/qemu-system-i386.js
+            qemujs-binaries/qemu-system-i386.wasm
             qemujs-binaries/*.data
             qemujs-binaries/shell.html
           if-no-files-found: error
