@@ -60,6 +60,7 @@ jobs:
           mkdir -p build
           cat > build/config-host.mak << 'EOF'
           SRC_PATH=/home/runner/work/AVM/AVM/qemu
+          TARGET_DIRS=i386-softmmu
           CONFIG_SDL=y
           CONFIG_XEN=n
           CONFIG_KVM=n
