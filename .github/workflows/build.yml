@@ -56,6 +56,7 @@ jobs:
           ar = 'emar'
           strip = 'emstrip'
           pkgconfig = 'pkg-config'
+          exe_wrapper = 'node'
           [host_machine]
           system = 'emscripten'
           cpu_family = 'wasm'
@@ -80,6 +81,12 @@ jobs:
             exit 1
           }
           emcc --version
+          # Verify node is available
+          which node || {
+            echo "Error: node not found in PATH!"
+            exit 1
+          }
+          node --version
           cd qemu
           # Explicitly set compiler variables
           export CC=emcc
