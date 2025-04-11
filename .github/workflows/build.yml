@@ -40,8 +40,6 @@ jobs:
       - name: Build Qemu.js
         run: |
           cd qemu
-          echo "Patching configure script for Emscripten..."
-          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
           echo "Creating Emscripten cross-file..."
           cat > emscripten-cross.txt << 'EOF'
           [binaries]
@@ -58,18 +56,20 @@ jobs:
           cpu = 'wasm32'
           endian = 'little'
           EOF
-          echo "Configuring QEMU with minimal options..."
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          emconfigure ./configure --target-list=i386-softmmu --enable-sdl --disable-xen --disable-kvm --disable-vnc --disable-docs --disable-tools --disable-guest-agent || {
-            echo "Error: Initial configure failed!"
-            if [ -f config.log ]; then
-              echo "Dumping config.log for debugging..."
-              cat config.log
-            fi
-            exit 1
-          }
           echo "Setting up Meson for cross-compilation..."
-          meson setup build --cross-file emscripten-cross.txt -Db_lto=true -Doptimization=2 || {
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          meson setup build \
+            --cross-file emscripten-cross.txt \
+            -Dtarget_list=i386-softmmu \
+            -Dsdl=enabled \
+            -Dxen=disabled \
+            -Dkvm=disabled \
+            -Dvnc=disabled \
+            -Ddocs=disabled \
+            -Dtools=disabled \
+            -Dguest_agent=disabled \
+            -Db_lto=true \
+            -Doptimization=2 || {
             echo "Error: Meson setup failed!"
             if [ -f build/meson-logs/meson-log.txt ]; then
               echo "Dumping meson-log.txt for debugging..."
