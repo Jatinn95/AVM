@@ -1,96 +1,146 @@
-name: Build APK
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+name: Build QEMU WebAssembly (Advanced)
+on: [push]
 
 jobs:
-  build:
+  build-qemu-wasm:
     runs-on: ubuntu-latest
-    env:
-      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+    timeout-minutes: 45
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: 'gradle'
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 python3-venv libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git meson
+        timeout-minutes: 5
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      with:
-        packages: 'build-tools;34.0.0 platform-tools platforms;android-34 ndk;25.2.9519653 cmake;3.22.1'
-        cmdline-tools-version: 'latest'
-        accept-android-sdk-licenses: true
+      - name: Install Emscripten
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
+          source ./emsdk_env.sh
+          echo "PATH=$PATH" >> $GITHUB_ENV
+          echo "EMSDK=$EMSDK" >> $GITHUB_ENV
+          emcc --version
+        working-directory: .
+        timeout-minutes: 10
 
-    - name: Verify Android SDK
-      run: |
-        echo "ANDROID_HOME: $ANDROID_HOME"
-        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        echo "Installed packages:"
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed
-        echo "Java version:"
-        java -version
+      - name: Download QEMU Source
+        run: |
+          QEMU_VERSION="9.2.0"
+          wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz || {
+            echo "Error: Failed to download qemu-${QEMU_VERSION}.tar.xz."
+            exit 1
+          }
+          tar -xf qemu-${QEMU_VERSION}.tar.xz
+          mv qemu-${QEMU_VERSION} qemu
+        timeout-minutes: 10
 
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v3
-      with:
-        gradle-version: wrapper
-        cache-read-only: false
+      - name: Patch QEMU Configure Script
+        run: |
+          cd qemu
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          echo "Patched configure script to force host_os=linux"
+        working-directory: .
 
-    - name: Cache Gradle dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
+      - name: Create Meson Cross File for Emscripten
+        run: |
+          mkdir -p qemu
+          cat << EOF > qemu/emscripten_cross.txt
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          strip = 'emstrip'
+          pkgconfig = 'pkg-config'
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+          [properties]
+          needs_exe_wrapper = true
+          EOF
+        working-directory: .
 
-    - name: Make gradlew executable
-      run: chmod +x gradlew
+      - name: Configure QEMU for WebAssembly
+        run: |
+          source "${{ env.EMSDK }}/emsdk_env.sh"
+          cd qemu
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
+          ./configure \
+            --target-list=i386-softmmu \
+            --enable-tcg-interpreter \
+            --disable-xen \
+            --enable-sdl \
+            --audio-drv-list= \
+            --cross-prefix= \
+            --extra-cflags="-s USE_SDL=2" \
+            --extra-ldflags="-s USE_SDL=2" || {
+            echo "Configure failed! Check logs above for details."
+            exit 1
+          }
+          meson setup build \
+            --cross-file emscripten_cross.txt \
+            -Doptimization=2 \
+            -Dstrip=false \
+            --reconfigure || {
+            echo "Meson configuration failed! Check logs above for details."
+            exit 1
+          }
+          echo "Configuration completed successfully."
+        working-directory: .
+        timeout-minutes: 10
 
-    - name: Verify Gradle Wrapper JAR
-      run: |
-        ls -lh gradle/wrapper/gradle-wrapper.jar
-        file gradle/wrapper/gradle-wrapper.jar
+      - name: Build QEMU
+        run: |
+          source "${{ env.EMSDK }}/emsdk_env.sh"
+          cd qemu
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS=['_main'] -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
+          emmake ninja -C build -j2 || {
+            echo "Build failed! Check logs above for details."
+            exit 1
+          }
+          echo "Build completed, checking binaries:"
+          ls -la build/i386-softmmu || {
+            echo "Directory build/i386-softmmu not found!"
+            ls -la build
+            exit 1
+          }
+          ls -la build/i386-softmmu/qemu-system-i386*
+        working-directory: .
+        timeout-minutes: 25
 
-    - name: Check Gradle Version
-      run: ./gradlew --version --stacktrace
+      - name: Verify Output Files
+        run: |
+          cd qemu/build/i386-softmmu
+          if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
+            echo "Error: Missing or empty qemu-system-i386.js or qemu-system-i386.wasm!"
+            ls -la .
+            exit 1
+          fi
+          echo "Output files verified:"
+          ls -la qemu-system-i386.*
+        working-directory: .
 
-    - name: Build with diagnostics
-      run: |
-        ./gradlew assembleDebug --stacktrace --info --no-daemon || \
-        (./gradlew androidDependencies --stacktrace --info && exit 1)
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-wasm-i386
+          path: qemu/build/i386-softmmu/qemu-system-i386.*
+          if-no-files-found: error
+          retention-days: 7
 
-    - name: Check Deprecation Warnings
-      if: failure()
-      run: ./gradlew assembleDebug --warning-mode all --stacktrace --no-daemon
+      - name: Cleanup
+        run: |
+          rm -rf qemu emsdk
+        if: always()
 
-    - name: Upload APK artifacts
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: apk-artifacts
-        path: |
-          **/build/outputs/apk/**/*.apk
-          **/build/outputs/mapping/**/mapping.txt
-        if-no-files-found: warn
-
-    - name: Upload build reports
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-reports
-        path: |
-          **/build/reports/**
-          **/build/outputs/logs/**
-          **/build/**/*.html
-        if-no-files-found: ignore
+      - name: Notify Build Status
+        if: always()
+        run: |
+          echo "QEMU WebAssembly build completed with status: ${{ job.status }}"
