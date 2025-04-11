@@ -61,6 +61,11 @@ jobs:
           cpu_family = 'wasm'
           cpu = 'wasm32'
           endian = 'little'
+          [built-in options]
+          c_args = ['-m32']
+          c_link_args = ['-m32']
+          cpp_args = ['-m32']
+          cpp_link_args = ['-m32']
           [properties]
           needs_exe_wrapper = true
           EOF
@@ -89,8 +94,8 @@ jobs:
             --enable-sdl \
             --audio-drv-list= \
             --cross-prefix= \
-            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1" \
-            --extra-ldflags="-s USE_SDL=2" || {
+            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -m32" \
+            --extra-ldflags="-s USE_SDL=2 -m32" || {
             echo "Configure failed! Check logs above for details."
             exit 1
           }
@@ -98,8 +103,10 @@ jobs:
             --cross-file emscripten_cross.txt \
             -Doptimization=2 \
             -Dstrip=false \
+            -Dtarget_bits=32 \
             --reconfigure || {
             echo "Meson configuration failed! Check logs above for details."
+            cat build/meson-logs/meson-log.txt
             exit 1
           }
           echo "Configuration completed successfully."
@@ -110,8 +117,8 @@ jobs:
         run: |
           source "${{ env.EMSDK }}/emsdk_env.sh"
           cd qemu
-          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1"
-          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS=['_main'] -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1 -s WASM=1"
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -m32"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS=['_main'] -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -m32"
           emmake ninja -C build -j2 || {
             echo "Build failed! Check logs above for details."
             exit 1
