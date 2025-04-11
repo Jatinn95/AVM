@@ -69,13 +69,16 @@ jobs:
           cpp_link_args = ['-m32']
           [properties]
           needs_exe_wrapper = true
+          skip_sanity_check = true
           EOF
           cat << EOF > qemu/node_wrapper.sh
           #!/bin/bash
-          node --experimental-wasm-threads --experimental-wasm-bulk-memory "\$@"
+          echo "Running node wrapper with args: \$@"
+          node --experimental-wasm-threads --experimental-wasm-bulk-memory --experimental-wasm-unsafe-eval "\$@"
           EOF
           chmod +x qemu/node_wrapper.sh
           echo "Created cross file and node wrapper script"
+          ls -la qemu/node_wrapper.sh
         working-directory: .
 
       - name: Configure QEMU for WebAssembly
@@ -112,7 +115,7 @@ jobs:
             echo "Configure failed! Check logs above for details."
             exit 1
           }
-          # Debug sanity test binary
+          # Debug sanity test
           meson setup build \
             --cross-file emscripten_cross.txt \
             -Doptimization=2 \
