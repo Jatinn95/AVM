@@ -1,112 +1,193 @@
-#!/bin/bash
-set -e
+name: Build QEMU WebAssembly (Advanced)
+on: [push]  # Line 2: Valid syntax, triggers on push events
+jobs:
+  build-qemu-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-# Setup Emscripten
-git clone https://github.com/emscripten-core/emsdk.git
-cd emsdk
-./emsdk install latest
-./emsdk activate latest
-source ./emsdk_env.sh
-cd ..
+      - name: Verify Workflow Version
+        run: |
+          echo "Running workflow version with meson.build patch (2025-04-11)"
+          echo "WORKFLOW_MARKER=MESON_PATCH_2025_04_11" >> $GITHUB_ENV
 
-# Install dependencies (Ubuntu example)
-sudo apt-get update
-sudo apt-get install -y build-essential python3 python3-venv libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git meson
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 python3-venv libsdl2-dev libglib2.0-dev libpixman-1-dev ninja-build git meson
+        timeout-minutes: 5
 
-# Download QEMU
-QEMU_VERSION="9.2.0"
-wget https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz
-tar -xf qemu-${QEMU_VERSION}.tar.xz
-mv qemu-${QEMU_VERSION} qemu
-cd qemu
+      - name: Install Emscripten
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
+          source ./emsdk_env.sh
+          echo "PATH=$PATH" >> $GITHUB_ENV
+          echo "EMSDK=$EMSDK" >> $GITHUB_ENV
+          emcc --version
+        working-directory: .
+        timeout-minutes: 10
 
-# Patch configure script
-sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+      - name: Download QEMU Source
+        run: |
+          QEMU_VERSION="9.2.0"
+          wget --timeout=300 --tries=3 https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz || {
+            echo "Error: Failed to download qemu-${QEMU_VERSION}.tar.xz."
+            exit 1
+          }
+          tar -xf qemu-${QEMU_VERSION}.tar.xz
+          mv qemu-${QEMU_VERSION} qemu
+        timeout-minutes: 10
 
-# Patch meson.build to skip sanity check
-sed -i '/run_command.*sanitycheckc_cross/s/run_command.*$/true/' meson.build || {
-  echo "Failed to patch meson.build; checking content"
-  grep "sanitycheckc_cross" meson.build || echo "No sanity check found"
-  exit 1
-}
-echo "Patched meson.build to skip sanity check execution"
+      - name: Patch QEMU Configure Script
+        run: |
+          cd qemu
+          sed -i '/Unrecognized host OS/ { s/error_exit/#error_exit/; s|$|\necho "Forcing host OS to linux for Emscripten build"\nhost_os=linux|; }' configure
+          echo "Patched configure script to force host_os=linux"
+        working-directory: .
 
-# Create Meson cross file
-cat << EOF > emscripten_cross.txt
-[binaries]
-c = 'emcc'
-cpp = 'em++'
-ar = 'emar'
-strip = 'emstrip'
-pkgconfig = 'pkg-config'
-exe_wrapper = './node_wrapper.sh'
-[host_machine]
-system = 'emscripten'
-cpu_family = 'wasm'
-cpu = 'wasm32'
-endian = 'little'
-[built-in options]
-c_args = ['-m32']
-c_link_args = ['-m32']
-cpp_args = ['-m32']
-cpp_link_args = ['-m32']
-[properties]
-needs_exe_wrapper = true
-EOF
+      - name: Patch QEMU Meson Build
+        run: |
+          cd qemu
+          sed -i '/run_command.*sanitycheckc_cross/s/run_command.*$/true/' meson.build || {
+            echo "Failed to patch meson.build; checking if already patched"
+            grep "sanitycheckc_cross" meson.build || echo "No sanity check found in meson.build"
+            exit 1
+          }
+          echo "Patched meson.build to skip sanity check execution"
+        working-directory: .
 
-# Create node wrapper
-cat << EOF > node_wrapper.sh
-#!/bin/bash
-echo "Running node wrapper with args: \$@"
-node --experimental-wasm-threads --experimental-wasm-bulk-memory --experimental-wasm-unsafe-eval "\$@"
-EOF
-chmod +x node_wrapper.sh
+      - name: Create Meson Cross File and Wrapper
+        run: |
+          mkdir -p qemu
+          cat << EOF > qemu/emscripten_cross.txt
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          strip = 'emstrip'
+          pkgconfig = 'pkg-config'
+          exe_wrapper = '/home/runner/work/AVM/AVM/qemu/node_wrapper.sh'
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+          [built-in options]
+          c_args = ['-m32']
+          c_link_args = ['-m32']
+          cpp_args = ['-m32']
+          cpp_link_args = ['-m32']
+          [properties]
+          needs_exe_wrapper = true
+          EOF
+          cat << EOF > qemu/node_wrapper.sh
+          #!/bin/bash
+          echo "Running node wrapper with args: \$@"
+          node --experimental-wasm-threads --experimental-wasm-bulk-memory --experimental-wasm-unsafe-eval "\$@"
+          EOF
+          chmod +x qemu/node_wrapper.sh
+          echo "Created cross file and node wrapper script"
+          ls -la qemu/node_wrapper.sh
+        working-directory: .
 
-# Configure and build
-export CC=emcc
-export CXX=em++
-export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
-./configure \
-  --cc=emcc \
-  --cxx=em++ \
-  --target-list=i386-softmmu \
-  --enable-tcg-interpreter \
-  --disable-xen \
-  --enable-sdl \
-  --audio-drv-list= \
-  --cross-prefix= \
-  --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -m32" \
-  --extra-ldflags="-s USE_SDL=2 -m32" || {
-  echo "Configure failed!"
-  exit 1
-}
+      - name: Configure QEMU for WebAssembly
+        run: |
+          source "${{ env.EMSDK }}/emsdk_env.sh"
+          which emcc || {
+            echo "Error: emcc not found in PATH after sourcing emsdk_env.sh!"
+            exit 1
+          }
+          emcc --version
+          which node || {
+            echo "Error: node not found in PATH!"
+            exit 1
+          }
+          node --version
+          cd qemu
+          export CC=emcc
+          export CXX=em++
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
+          ./configure \
+            --cc=emcc \
+            --cxx=em++ \
+            --target-list=i386-softmmu \
+            --enable-tcg-interpreter \
+            --disable-xen \
+            --enable-sdl \
+            --audio-drv-list= \
+            --cross-prefix= \
+            --extra-cflags="-s USE_SDL=2 -s ASSERTIONS=1 -m32" \
+            --extra-ldflags="-s USE_SDL=2 -m32" || {
+            echo "Configure failed! Check logs above for details."
+            exit 1
+          }
+          meson setup build \
+            --cross-file emscripten_cross.txt \
+            -Doptimization=2 \
+            -Dstrip=false \
+            -Dtarget_bits=32 \
+            --reconfigure || {
+            echo "Meson configuration failed! Check logs above for details."
+            ls -la build/meson-private
+            file build/meson-private/sanitycheckc_cross.exe || echo "Sanity check binary not found"
+            cat build/meson-logs/meson-log.txt
+            exit 1
+          }
+          echo "Configuration completed successfully."
+        working-directory: .
+        timeout-minutes: 10
 
-meson setup build \
-  --cross-file emscripten_cross.txt \
-  -Doptimization=2 \
-  -Dstrip=false \
-  -Dtarget_bits=32 \
-  --reconfigure || {
-  echo "Meson setup failed!"
-  ls -la build/meson-private
-  file build/meson-private/sanitycheckc_cross.exe || echo "Sanity check binary not found"
-  cat build/meson-logs/meson-log.txt
-  exit 1
-}
+      - name: Build QEMU
+        run: |
+          source "${{ env.EMSDK }}/emsdk_env.sh"
+          cd qemu
+          export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -m32"
+          export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS=['_main'] -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -m32"
+          emmake ninja -C build -j2 || {
+            echo "Build failed! Check logs above for details."
+            exit 1
+          }
+          echo "Build completed, checking binaries:"
+          ls -la build/i386-softmmu || {
+            echo "Directory build/i386-softmmu not found!"
+            ls -la build
+            exit 1
+          }
+          ls -la build/i386-softmmu/qemu-system-i386*
+        working-directory: .
+        timeout-minutes: 25
 
-export CFLAGS="-s USE_SDL=2 -s ASSERTIONS=1 -s SAFE_HEAP=1 -m32"
-export LDFLAGS="-s USE_SDL=2 -s EXPORTED_FUNCTIONS=['_main'] -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 -m32"
-emmake ninja -C build -j2 || {
-  echo "Build failed!"
-  exit 1
-}
+      - name: Verify Output Files
+        run: |
+          cd qemu/build/i386-softmmu
+          if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
+            echo "Error: Missing or empty qemu-system-i386.js or qemu-system-i386.wasm!"
+            ls -la .
+            exit 1
+          fi
+          echo "Output files verified:"
+          ls -la qemu-system-i386.*
+        working-directory: .
 
-# Verify output
-cd build/i386-softmmu
-if [ ! -f "qemu-system-i386.js" ] || [ ! -f "qemu-system-i386.wasm" ] || [ ! -s "qemu-system-i386.wasm" ]; then
-  echo "Error: Missing or empty output files!"
-  ls -la .
-  exit 1
-fi
-echo "Build successful! Output files:"
-ls -la qemu-system-i386.*
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-wasm-i386
+          path: qemu/build/i386-softmmu/qemu-system-i386.*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Cleanup
+        run: |
+          rm -rf qemu emsdk
+        if: always()
+
+      - name: Notify Build Status
+        if: always()
+        run: |
+          echo "QEMU WebAssembly build completed with status: ${{ job.status }}"
