@@ -1,251 +1,203 @@
-name: Build QEMU WebAssembly (Advanced)
-on: [push]
-jobs:
-  prebuilt-qemu-js:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      QEMU_VERSION: "9.2.0"
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
+Run cd qemu
+Patching meson.build to allow emcc and GCC...
+Dumping meson.build context for debugging:
+endif
 
-      - name: Install Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
+modular_tcg = []
+# Darwin does not support references to thread-local variables in modules
+if host_os != 'darwin'
+  modular_tcg = ['i386-softmmu', 'x86_64-softmmu']
+endif
 
-      - name: Install Emscripten
-        run: |
-          git clone https://github.com/emscripten-core/emsdk.git
-          cd emsdk
-          ./emsdk install latest
-          ./emsdk activate latest
-          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
-          source ./emsdk_env.sh
-          echo "Emscripten version: $(emcc --version)"
-        working-directory: .
-        timeout-minutes: 10
+##################
+# Compiler flags #
+##################
 
-      - name: Install Build Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential git python3 python3-pip ninja-build libsdl2-dev libpixman-1-dev
-          pip3 install meson==1.5.0
+foreach lang : all_languages
+  compiler = meson.get_compiler(lang)
+  if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')
+    # ok
+  elif compiler.get_id() == 'clang' and compiler.compiles('''
+      #ifdef __apple_build_version__
+      # if __clang_major__ < 15 || (__clang_major__ == 15 && __clang_minor__ < 0)
+      #  error You need at least XCode Clang v15.0 to compile QEMU
+      # endif
+      #else
+      # if __clang_major__ < 10 || (__clang_major__ == 10 && __clang_minor__ < 0)
+      #  error You need at least Clang v10.0 to compile QEMU
+      # endif
+      #endif''')
+    # ok
+  else
+    error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')
+  endif
+endforeach
 
-      - name: Cache QEMU Tarball
-        uses: actions/cache@v3
-        with:
-          path: qemu-${{ env.QEMU_VERSION }}.tar.xz
-          key: qemu-tarball-${{ env.QEMU_VERSION }}
+# default flags for all hosts
+# We use -fwrapv to tell the compiler that we require a C dialect where
+# left shift of signed integers is well defined and has the expected
+# 2s-complement style results. (Both clang and gcc agree that it
+# provides these semantics.)
 
-      - name: Download and Extract QEMU
-        run: |
-          if [ -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
-            echo "Using cached tarball..."
-            echo "Verifying cached tarball integrity..."
-            COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
-            echo "Computed SHA256: $COMPUTED_CHECKSUM"
-            echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
-            if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
-              echo "Cached checksum verified!"
-            else
-              echo "Cached checksum mismatch! Removing cached file..."
-              rm qemu-${{ env.QEMU_VERSION }}.tar.xz
-            fi
-          fi
-          if [ ! -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
-            for attempt in {1..5}; do
-              echo "Download attempt $attempt of 5..."
-              wget --tries=2 --timeout=30 -O qemu-${{ env.QEMU_VERSION }}.tar.xz https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
-              echo "Verifying tarball integrity..."
-              COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
-              echo "Computed SHA256: $COMPUTED_CHECKSUM"
-              echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
-              if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
-                echo "Checksum verified!"
-                break
-              else
-                echo "Checksum mismatch on attempt $attempt!"
-                if [ $attempt -eq 5 ]; then
-                  echo "Error: Tarball checksum failed after 5 attempts!"
-                  exit 1
-                fi
-                rm qemu-${{ env.QEMU_VERSION }}.tar.xz
-                sleep 5
-              fi
-            done
-          fi
-          tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
-          mv qemu-${{ env.QEMU_VERSION }} qemu
+qemu_common_flags = [
+  '-D_GNU_SOURCE', '-D_FILE_OFFSET_BITS=64', '-D_LARGEFILE_SOURCE',
+  '-fno-strict-aliasing', '-fno-common', '-fwrapv' ]
+qemu_cflags = []
+qemu_ldflags = []
 
-      - name: Build Qemu.js
-        run: |
-          cd qemu
-          echo "Patching meson.build to allow emcc and GCC..."
-          echo "Dumping meson.build context for debugging:"
-          sed -n '300,350p' meson.build
-          echo "Checking file identity:"
-          head -n 5 meson.build
-          # Patch to allow emcc and relax GCC version check
-          sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc'\n    # ok\n  endif\n  /}" meson.build
-          sed -i "s/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/if compiler.get_id() == 'gcc'/" meson.build || {
-            echo "Error: Failed to patch meson.build!"
-            echo "Dumping updated meson.build snippet:"
-            sed -n '300,350p' meson.build
-            exit 1
-          }
-          echo "Verifying patch..."
-          grep "if compiler.get_id() == 'emcc'" meson.build && grep "if compiler.get_id() == 'gcc'" meson.build || {
-            echo "Error: Patch verification failed! Dumping context for debugging:"
-            sed -n '300,350p' meson.build
-            exit 1
-          }
-          echo "Creating Emscripten cross-file..."
-          cat > emscripten-cross.txt << 'EOF'
-          [binaries]
-          c = 'emcc'
-          cpp = 'em++'
-          ar = 'emar'
-          strip = 'emstrip'
-          pkg-config = 'pkg-config'
-          [properties]
-          needs_exe_wrapper = true
-          [host_machine]
-          system = 'emscripten'
-          cpu_family = 'wasm'
-          cpu = 'wasm32'
-          endian = 'little'
-          EOF
-          echo "Creating minimal config-host.mak..."
-          mkdir -p build
-          cat > build/config-host.mak << 'EOF'
-          SRC_PATH=/home/runner/work/AVM/AVM/qemu
-          TARGET_DIRS=i386-softmmu
-          CONFIG_SDL=y
-          CONFIG_XEN=n
-          CONFIG_KVM=n
-          CONFIG_VNC=n
-          CONFIG_DOCS=n
-          CONFIG_TOOLS=n
-          CONFIG_GUEST_AGENT=n
-          CONFIG_LINUX=y
-          EOF
-          echo "Setting up Meson for cross-compilation..."
-          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-          meson setup build \
-            --cross-file emscripten-cross.txt \
-            -Dsdl=enabled \
-            -Dxen=disabled \
-            -Dkvm=disabled \
-            -Dvnc=disabled \
-            -Ddocs=disabled \
-            -Dtools=disabled \
-            -Dguest_agent=disabled \
-            -Db_lto=true \
-            -Doptimization=2 || {
-            echo "Error: Meson setup failed!"
-            if [ -f build/meson-logs/meson-log.txt ]; then
-              echo "Dumping meson-log.txt for debugging..."
-              cat build/meson-logs/meson-log.txt
-            fi
-            exit 1
-          }
-          echo "Building with ninja..."
-          cd build
-          ninja i386-softmmu/qemu-system-i386 CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
-            echo "Error: Ninja build failed!"
-            exit 1
-          }
-          echo "Build completed, listing generated files..."
-          ls -la i386-softmmu/qemu-system-i386*
-          if [ -f "i386-softmmu/qemu-system-i386.wasm" ]; then
-            FILE_SIZE=$(stat -f%z i386-softmmu/qemu-system-i386.wasm 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.wasm)
-            echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
-            if [ "$FILE_SIZE" -eq 0 ]; then
-              echo "Error: qemu-system-i386.wasm is empty!"
-              exit 1
-            fi
-          else
-            echo "Error: qemu-system-i386.wasm not generated!"
-            exit 1
-          fi
-          if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
-            FILE_SIZE=$(stat -f%z i386-softmmu/qemu-system-i386.js 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.js)
-            echo "qemu-system-i386.js size: $FILE_SIZE bytes"
-          else
-            echo "Warning: qemu-system-i386.js not generated!"
-          fi
-          mkdir -p ../../qemujs-binaries
-          echo "Copying generated files..."
-          cp i386-softmmu/qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: No qemu-system-i386.js found."
-          cp i386-softmmu/qemu-system-i386.wasm ../../qemujs-binaries/ || {
-            echo "Error: Failed to copy qemu-system-i386.wasm!"
-            exit 1
-          }
-          cp i386-softmmu/*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
-          echo "Listing copied files in qemujs-binaries..."
-          ls -la ../../qemujs-binaries
-        working-directory: .
+if host_os == 'darwin'
+  # Disable attempts to use ObjectiveC features in os/object.h since they
+  # won't work when we're compiling with gcc as a C compiler.
+  if compiler.get_id() == 'gcc'
+    qemu_common_flags += '-DOS_OBJECT_USE_OBJC=0'
+  endif
+elif host_os == 'sunos'
+Checking file identity:
+project('qemu', ['c'], meson_version: '>=1.5.0',
+        default_options: ['warning_level=1', 'c_std=gnu11', 'cpp_std=gnu++11', 'b_colorout=auto',
+                          'b_staticpic=false', 'stdsplit=false', 'optimization=2', 'b_pie=true'],
+        version: files('VERSION'))
 
-      - name: Verify Files in Binaries Directory
-        run: |
-          cd qemujs-binaries
-          echo "Verifying files in qemujs-binaries..."
-          ls -la
-          if [ -f "qemu-system-i386.wasm" ]; then
-            FILE_SIZE=$(stat -f%z qemu-system-i386.wasm 2>/dev/null || stat -c%s qemu-system-i386.wasm)
-            echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
-            if [ "$FILE_SIZE" -eq 0 ]; then
-              echo "Error: qemu-system-i386.wasm is empty!"
-              exit 1
-            fi
-          else
-            echo "Error: qemu-system-i386.wasm not found in qemujs-binaries!"
-            exit 1
-          fi
-          if [ -f "qemu-system-i386.js" ]; then
-            FILE_SIZE=$(stat -f%z qemu-system-i386.js 2>/dev/null || stat -c%s qemu-system-i386.js)
-            echo "qemu-system-i386.js size: $FILE_SIZE bytes"
-          else
-            echo "Warning: qemu-system-i386.js not found."
-          fi
-        working-directory: .
+Verifying patch...
+  if compiler.get_id() == 'emcc'
+  if compiler.get_id() == 'gcc'
+  if compiler.get_id() == 'gcc'
+Creating Emscripten cross-file...
+Creating minimal config-host.mak...
+Setting up Meson for cross-compilation...
+Setting up EMSDK environment (suppress these messages with EMSDK_QUIET=1)
+Adding directories to PATH:
+PATH += /home/runner/work/AVM/AVM/emsdk
+PATH += /home/runner/work/AVM/AVM/emsdk/upstream/emscripten
 
-      - name: Test Qemu.js Binary
-        run: |
-          cd qemujs-binaries
-          echo "Testing Qemu.js binary..."
-          if [ -f "qemu-system-i386.js" ]; then
-            node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
-          else
-            echo "Warning: qemu-system-i386.js not found, skipping test."
-          fi
-          if [ -f "qemu-system-i386.wasm" ]; then
-            echo "Found qemu-system-i386.wasm."
-            ls -la qemu-system-i386.wasm
-          else
-            echo "Error: qemu-system-i386.wasm not found!"
-            exit 1
-          fi
-        working-directory: .
+Setting environment variables:
+PATH = /home/runner/work/AVM/AVM/emsdk:/home/runner/work/AVM/AVM/emsdk/upstream/emscripten:/opt/hostedtoolcache/node/20.19.0/x64/bin:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games
+EMSDK = /home/runner/work/AVM/AVM/emsdk
+EMSDK_NODE = /home/runner/work/AVM/AVM/emsdk/node/20.18.0_64bit/bin/node
+Clearing existing environment variable: EMSDK_PATH
+WARNING: Unknown CPU family wasm, please report this at https://github.com/mesonbuild/meson/issues/new
+The Meson build system
+Version: 1.5.0
+Source dir: /home/runner/work/AVM/AVM/qemu
+Build dir: /home/runner/work/AVM/AVM/qemu/build
+Build type: cross build
+Project name: qemu
+Project version: 9.2.0
+C compiler for the host machine: emcc (emscripten 4.0.6 "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 4.0.6 (1ddaae4d2d6dfbb678ecc193bc988820d1fc4633)")
+C linker for the host machine: emcc ld.wasm 21.0.0
+C compiler for the build machine: cc (gcc 13.3.0 "cc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0")
+C linker for the build machine: cc ld.bfd 2.42
+Build machine cpu family: x86_64
+Build machine cpu: x86_64
+Host machine cpu family: wasm
+Host machine cpu: wasm32
+Target machine cpu family: wasm
+Target machine cpu: wasm32
+Program scripts/symlink-install-tree.py found: YES (/usr/bin/python3 /home/runner/work/AVM/AVM/qemu/scripts/symlink-install-tree.py)
+Program sh found: YES (/usr/bin/sh)
+Program python3 found: YES (/usr/bin/python3)
+Compiler for language rust skipped: feature rust disabled
+Program iasl found: NO
+Program bzip2 found: YES (/usr/bin/bzip2)
 
-      - name: Upload Qemu.js Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: qemu-js-prebuilt
-          path: |
-            qemujs-binaries/qemu-system-i386.js
-            qemujs-binaries/qemu-system-i386.wasm
-            qemujs-binaries/*.data
-          if-no-files-found: error
-          retention-days: 7
+meson.build:332:4: ERROR: Problem encountered: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU
 
-      - name: Cleanup
-        run: |
-          rm -rf qemu emsdk qemujs-binaries
+A full log can be found at /home/runner/work/AVM/AVM/qemu/build/meson-logs/meson-log.txt
+Error: Meson setup failed!
+Dumping meson-log.txt for debugging...
+Build started at 2025-04-12T06:27:39.993088
+Main binary: /usr/bin/python3
+Build Options: -Dsdl=enabled -Dxen=disabled -Dkvm=disabled -Dvnc=disabled -Ddocs=disabled -Dtools=disabled -Dguest_agent=disabled -Db_lto=true -Doptimization=2 --cross-file=emscripten-cross.txt
+Python system: Linux
+The Meson build system
+Version: 1.5.0
+Source dir: /home/runner/work/AVM/AVM/qemu
+Build dir: /home/runner/work/AVM/AVM/qemu/build
+Build type: cross build
+Project name: qemu
+Project version: 9.2.0
+-----------
+Detecting compiler via: `emcc --version` -> 0
+stdout:
+emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 4.0.6 (1ddaae4d2d6dfbb678ecc193bc988820d1fc4633)
+Copyright (C) 2025 the Emscripten authors (see AUTHORS.txt)
+This is free and open source software under the MIT license.
+There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+-----------
+Sanity testing C compiler: emcc
+Is cross compiler: True.
+Sanity check compiler command line: emcc sanitycheckc.c -o sanitycheckc_cross.exe -D_FILE_OFFSET_BITS=64 -c
+Sanity check compile stdout:
 
-      - name: Notify Build Status
-        if: always()
-        run: |
-          echo "Pre-built Qemu.js job completed with status: ${{ job.status }}"
+-----
+Sanity check compile stderr:
+
+-----
+C compiler for the host machine: emcc (emscripten 4.0.6 "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 4.0.6 (1ddaae4d2d6dfbb678ecc193bc988820d1fc4633)")
+C linker for the host machine: emcc ld.wasm 21.0.0
+-----------
+Detecting archiver via: `emar --version` -> 0
+stdout:
+LLVM (http://llvm.org/):
+  LLVM version 21.0.0git
+  Optimized build.
+-----------
+-----------
+Detecting compiler via: `cc --version` -> 0
+stdout:
+cc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+-----------
+Running command: -cpp -x c -E -dM -
+-----
+-----------
+Detecting linker via: `cc -Wl,--version` -> 0
+stdout:
+GNU ld (GNU Binutils for Ubuntu) 2.42
+Copyright (C) 2024 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) a later version.
+This program has absolutely no warranty.
+-----------
+stderr:
+collect2 version 13.3.0
+/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-linux-gnu/13/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper -plugin-opt=-fresolution=/tmp/cc5a4vJ6.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -z now -z relro /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/13 -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/13/../../.. --version -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crtn.o
+-----------
+Sanity testing C compiler: cc
+Is cross compiler: False.
+Sanity check compiler command line: cc sanitycheckc.c -o sanitycheckc.exe -D_FILE_OFFSET_BITS=64
+Sanity check compile stdout:
+
+-----
+Sanity check compile stderr:
+
+-----
+Running test binary command:  /home/runner/work/AVM/AVM/qemu/build/meson-private/sanitycheckc.exe
+C compiler for the build machine: cc (gcc 13.3.0 "cc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0")
+C linker for the build machine: cc ld.bfd 2.42
+-----------
+Detecting archiver via: `gcc-ar --version` -> 0
+stdout:
+GNU ar (GNU Binutils for Ubuntu) 2.42
+Copyright (C) 2024 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+-----------
+Build machine cpu family: x86_64
+Build machine cpu: x86_64
+Host machine cpu family: wasm
+Host machine cpu: wasm32
+Target machine cpu family: wasm
+Target machine cpu: wasm32
+Program scripts/symlink-install-tree.py found: YES (/usr/bin/python3 /home/runner/work/AVM/AVM/qemu/scripts/symlink-install-tree.py)
+Program sh found: YES (/usr/bin/sh)
+Program python3 found: YES (/usr/bin/python3)
+Compiler for language rust skipped: feature rust disabled
+Program iasl found: NO
+Program bzip2 found: YES (/usr/bin/bzip2)
+
+meson.build:332:4: ERROR: Problem encountered: You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU
+Error: Process completed with exit code 1.
