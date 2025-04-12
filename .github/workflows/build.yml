@@ -82,22 +82,24 @@ jobs:
       - name: Build Qemu.js
         run: |
           cd qemu
-          echo "Patching meson.build to allow emcc and GCC..."
+          echo "Patching meson.build to allow emcc and any GCC version..."
           echo "Dumping meson.build context for debugging:"
           sed -n '300,350p' meson.build
           echo "Checking file identity:"
           head -n 5 meson.build
-          # Patch to allow emcc
+          # Patch to allow emcc early in the compiler check
           sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc'\n    # ok\n  endif\n  /}" meson.build
-          # Patch to allow any GCC version
-          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/c\  if compiler.get_id() == 'gcc'\n    # ok" meson.build || {
+          # Patch to remove GCC version check globally
+          sed -i "s/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/if compiler.get_id() == 'gcc'/" meson.build
+          # Additional patch to replace error message block with broader acceptance
+          sed -i "/error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')/c\    # Allow other compilers for cross-compilation" meson.build || {
             echo "Error: Failed to patch meson.build!"
             echo "Dumping updated meson.build snippet:"
             sed -n '300,350p' meson.build
             exit 1
           }
           echo "Verifying patch..."
-          grep "if compiler.get_id() == 'emcc'" meson.build && grep "if compiler.get_id() == 'gcc' *# ok" meson.build || {
+          grep "if compiler.get_id() == 'emcc'" meson.build && grep "if compiler.get_id() == 'gcc'" meson.build && ! grep "error('You either need GCC v7.4" meson.build || {
             echo "Error: Patch verification failed! Dumping context for debugging:"
             sed -n '300,350p' meson.build
             exit 1
@@ -186,7 +188,6 @@ jobs:
           }
           cp i386-softmmu/*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
           echo "Listing copied files in qemujs-binaries..."
-          ls detailed view
           ls -la ../../qemujs-binaries
         working-directory: .
 
