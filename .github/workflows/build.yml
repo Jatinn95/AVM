@@ -46,10 +46,10 @@ jobs:
       - name: Patch QEMU Build System
         run: |
           cd qemu-src
-          # Disable compiler checks that fail with Emscripten
-          sed -i 's/run_command(cc, check_args, check: true)/true/' configure
-          # Disable 64-bit compilation
-          sed -i 's/-m64//g' configure
+          # Patch to recognize Emscripten as a valid host
+          sed -i "s/if not os_info.is_linux() and not os_info.is_freebsd()/if not os_info.is_linux() and not os_info.is_freebsd() and not os.environ.get('EMSCRIPTEN')/" meson.build
+          # Disable 64-bit checks
+          sed -i 's/host_arch = host_machine.cpu_family()/host_arch = "wasm"/' meson.build
 
       - name: Configure and Build QEMU
         run: |
@@ -59,18 +59,30 @@ jobs:
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Create compiler wrappers
-          cat > emcc_wrapper << 'EOF'
-          #!/bin/bash
-          exec emcc -s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 "$@"
-          EOF
-          chmod +x emcc_wrapper
+          # Create Emscripten cross-compilation file
+          cat > emscripten-cross.txt << 'EOF'
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          strip = 'emstrip'
+          pkg-config = 'pkg-config'
           
-          # Configure QEMU with direct compiler specification
-          CC="$(pwd)/emcc_wrapper" \
-          CXX="$(which em++)" \
-          AR="$(which emar)" \
+          [properties]
+          needs_exe_wrapper = false
+          skip_sanity_check = true
+          
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+          EOF
+          
+          # Configure with explicit environment
+          EMSCRIPTEN=1 \
           ../qemu-src/configure \
+            --cross-prefix=em \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
@@ -82,12 +94,11 @@ jobs:
             --enable-lto \
             --enable-strip \
             --disable-pie \
-            --cross-prefix="" \
-            --extra-cflags="" \
-            --extra-ldflags=""
+            --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
+            --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
           
-          # Build with make (bypassing meson)
-          make -j$(nproc)
+          # Build with ninja
+          ninja -v
           
           # Verify the build output
           if [ -f "qemu-system-i386" ]; then
