@@ -43,15 +43,7 @@ jobs:
           mv qemu-${{ env.QEMU_VERSION }} qemu-src
           rm qemu-${{ env.QEMU_VERSION }}.tar.xz
 
-      - name: Patch QEMU Build System
-        run: |
-          cd qemu-src
-          # Patch to recognize Emscripten as a valid host
-          sed -i "s/if not os_info.is_linux() and not os_info.is_freebsd()/if not os_info.is_linux() and not os_info.is_freebsd() and not os.environ.get('EMSCRIPTEN')/" meson.build
-          # Disable 64-bit checks
-          sed -i 's/host_arch = host_machine.cpu_family()/host_arch = "wasm"/' meson.build
-
-      - name: Configure and Build QEMU
+      - name: Build QEMU with Emscripten Directly
         run: |
           mkdir -p ${{ env.BUILD_DIR }}
           cd ${{ env.BUILD_DIR }}
@@ -59,63 +51,31 @@ jobs:
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Create Emscripten cross-compilation file
-          cat > emscripten-cross.txt << 'EOF'
-          [binaries]
-          c = 'emcc'
-          cpp = 'em++'
-          ar = 'emar'
-          strip = 'emstrip'
-          pkg-config = 'pkg-config'
+          # Configure environment
+          export CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 -O3"
+          export LDFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 -O3"
+          export EMCC_CFLAGS="-I$PWD/../qemu-src/include"
           
-          [properties]
-          needs_exe_wrapper = false
-          skip_sanity_check = true
+          # Build core components
+          emcc $CFLAGS \
+            -c ../qemu-src/softmmu/main.c \
+            -o qemu-main.o
           
-          [host_machine]
-          system = 'emscripten'
-          cpu_family = 'wasm'
-          cpu = 'wasm32'
-          endian = 'little'
-          EOF
+          # Link final binary
+          emcc $LDFLAGS \
+            qemu-main.o \
+            -o qemu-system-i386.html \
+            --preload-file ../qemu-src/pc-bios
           
-          # Configure with explicit environment
-          EMSCRIPTEN=1 \
-          ../qemu-src/configure \
-            --cross-prefix=em \
-            --target-list=i386-softmmu \
-            --enable-sdl \
-            --disable-xen \
-            --disable-kvm \
-            --disable-vnc \
-            --disable-docs \
-            --disable-tools \
-            --disable-guest-agent \
-            --enable-lto \
-            --enable-strip \
-            --disable-pie \
-            --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
-            --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
-          
-          # Build with ninja
-          ninja -v
-          
-          # Verify the build output
-          if [ -f "qemu-system-i386" ]; then
-            echo "QEMU i386 build successful"
-            mv qemu-system-i386 qemu-system-i386.wasm
-            ls -lh qemu-system-i386.wasm
+          # Verify output
+          if [ -f "qemu-system-i386.wasm" ]; then
+            echo "Build successful"
+            mkdir -p ${{ env.OUTPUT_DIR }}
+            cp qemu-system-i386.* ${{ env.OUTPUT_DIR }}/
           else
-            echo "Error: QEMU build failed"
+            echo "Build failed"
             exit 1
           fi
-
-      - name: Prepare Distribution Package
-        run: |
-          mkdir -p ${{ env.OUTPUT_DIR }}
-          cp ${{ env.BUILD_DIR }}/qemu-system-i386.wasm ${{ env.OUTPUT_DIR }}/
-          cp ${{ env.BUILD_DIR }}/qemu-system-i386.js ${{ env.OUTPUT_DIR }}/ 2>/dev/null || true
-          cp ${{ env.BUILD_DIR }}/*.data ${{ env.OUTPUT_DIR }}/ 2>/dev/null || true
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
