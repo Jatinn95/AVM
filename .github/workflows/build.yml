@@ -51,29 +51,18 @@ jobs:
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Create Emscripten cross-compilation file
-          cat > emscripten-cross.txt << 'EOF'
-          [binaries]
-          c = 'emcc'
-          cpp = 'em++'
-          ar = 'emar'
-          strip = 'emstrip'
-          pkg-config = 'pkg-config'
+          # Create compiler symlinks that QEMU expects
+          ln -sf "$(which emcc)" emgcc
+          ln -sf "$(which em++)" emg++
+          ln -sf "$(which emar)" emar
+          export PATH="$PWD:$PATH"
           
-          [properties]
-          needs_exe_wrapper = false
-          skip_sanity_check = true
-          
-          [host_machine]
-          system = 'emscripten'
-          cpu_family = 'wasm'
-          cpu = 'wasm32'
-          endian = 'little'
-          EOF
-          
-          # First run configure with target list
+          # Configure QEMU
           ../qemu-src/configure \
-            --cross-prefix=em \
+            --cross-prefix="" \
+            --cc=emgcc \
+            --cxx=emg++ \
+            --host-cc=emgcc \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
@@ -87,12 +76,6 @@ jobs:
             --disable-pie \
             --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
             --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
-          
-          # Then run meson setup
-          meson setup . \
-            --cross-file emscripten-cross.txt \
-            --buildtype release \
-            --optimization 3
           
           # Build with ninja
           ninja -v
