@@ -44,41 +44,53 @@ jobs:
           if [ -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
             echo "Using cached tarball..."
             echo "Verifying cached tarball integrity..."
-            COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
-            echo "Computed SHA256: $COMPUTED_CHECKSUM"
-            echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
-            if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
-              echo "Cached checksum verified!"
-            else
-              echo "Cached checksum mismatch! Removing cached file..."
-              rm qemu-${{ env.QEMU_VERSION }}.tar.xz
-            fi
-          fi
-          if [ ! -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
-            for attempt in {1..5}; do
-              echo "Download attempt $attempt of 5..."
-              wget --tries=2 --timeout=30 -O qemu-${{ env.QEMU_VERSION }}.tar.xz https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
-              echo "Verifying tarball integrity..."
-              COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
-              echo "Computed SHA256: $COMPUTED_CHECKSUM"
-              echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
-              if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
-                echo "Checksum verified!"
-                break
-              else
-                echo "Checksum mismatch on attempt $attempt!"
-                if [ $attempt -eq 5 ]; then
-                  echo "Error: Tarball checksum failed after 5 attempts!"
-                  exit 1
-                fi
-                rm qemu-${{ env.QEMU_VERSION }}.tar.xz
-                sleep 5
-              fi
-            done
-          fi
-          tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
-          mv qemu-${{ env.QEMU_VERSION }} qemu
+            COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz#!/bin/bash
+# Define the version and checksum
+QEMU_VERSION="9.2.0"
+EXPECTED_CHECKSUM="f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
 
+# Check if the tarball exists
+if [ -f "qemu-${QEMU_VERSION}.tar.xz" ]; then
+    echo "Using cached tarball..."
+    echo "Verifying cached tarball integrity..."
+    COMPUTED_CHECKSUM=$(sha256sum qemu-${QEMU_VERSION}.tar.xz | cut -d' ' -f1)
+    echo "Computed SHA256: $COMPUTED_CHECKSUM"
+    echo "Expected SHA256: $EXPECTED_CHECKSUM"
+    if echo "$EXPECTED_CHECKSUM  qemu-${QEMU_VERSION}.tar.xz" | sha256sum -c; then
+        echo "Cached checksum verified!"
+    else
+        echo "Cached checksum mismatch! Removing cached file..."
+        rm qemu-${QEMU_VERSION}.tar.xz
+    fi
+fi
+
+# Download the tarball if it doesn't exist
+if [ ! -f "qemu-${QEMU_VERSION}.tar.xz" ]; then
+    for attempt in {1..5}; do
+        echo "Download attempt $attempt of 5..."
+        wget --tries=2 --timeout=30 -O qemu-${QEMU_VERSION}.tar.xz https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz
+        echo "Verifying tarball integrity..."
+        COMPUTED_CHECKSUM=$(sha256sum qemu-${QEMU_VERSION}.tar.xz | cut -d' ' -f1)
+        echo "Computed SHA256: $COMPUTED_CHECKSUM"
+        echo "Expected SHA256: $EXPECTED_CHECKSUM"
+        if echo "$EXPECTED_CHECKSUM  qemu-${QEMU_VERSION}.tar.xz" | sha256sum -c; then
+            echo "Checksum verified!"
+            break
+        else
+            echo "Checksum mismatch on attempt $attempt!"
+            if [ $attempt -eq 5 ]; then
+                echo "Error: Tarball checksum failed after 5 attempts!"
+                exit 1
+            fi
+            rm qemu-${QEMU_VERSION}.tar.xz
+            sleep 5
+        fi
+    done
+fi
+
+# Extract the tarball and rename the directory
+tar -xf qemu-${QEMU_VERSION}.tar.xz
+mv qemu-${QEMU_VERSION} qemu
       - name: Build Qemu.js
         run: |
           cd qemu
@@ -90,9 +102,9 @@ jobs:
           head -n 5 meson.build
           # Patch to allow emcc and em++ early in the compiler check
           sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'\n    # ok\n  endif\n  /}" meson.build
-          # Patch to replace entire compiler check block, including else clause
-          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/error('You either need GCC v7.4.*')/d" meson.build
-          sed -i "/foreach lang : all_languages/a\  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif" meson.build
+          # Patch to replace entire compiler check block
+          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/endif/d" meson.build
+          sed -i "/if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'/{n;s/endif/endif\n  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif/}" meson.build
           # Patch to remove CPU check error for wasm
           sed -i "/error('Unsupported CPU.*try --enable-tcg-interpreter'/c\    # Allow wasm CPU with TCG interpreter" meson.build || {
             echo "Error: Failed to patch meson.build for CPU check!"
@@ -105,7 +117,7 @@ jobs:
           grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build && \
           ! grep "error('You either need GCC v7.4" meson.build && \
           ! grep "error('Unsupported CPU" meson.build && \
-          ! grep -A 5 "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build | grep -q "^[[:space:]]*else" || {
+          grep "endforeach" meson.build | grep -q "foreach lang : all_languages" -B 10 || {
             echo "Error: Patch verification failed! Dumping context for debugging:"
             sed -n '300,350p' meson.build
             sed -n '870,880p' meson.build
