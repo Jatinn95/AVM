@@ -3,7 +3,7 @@ on: [push, workflow_dispatch]
 jobs:
   build-qemu-wasm:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       QEMU_VERSION: "9.2.0"
       EMSCRIPTEN_VERSION: "latest"
@@ -43,67 +43,65 @@ jobs:
           mv qemu-${{ env.QEMU_VERSION }} qemu-src
           rm qemu-${{ env.QEMU_VERSION }}.tar.xz
 
-      - name: Patch QEMU Build System
+      - name: Patch QEMU Source
         run: |
           cd qemu-src
-          # Create a custom target for Emscripten
-          cat >> meson.build << 'EOF'
-          if get_option('emscripten')
-            executable('qemu-system-i386.js',
-              sources: [
-                'softmmu/main.c',
-                # Add other necessary source files
-              ],
-              dependencies: [
-                dependency('sdl2'),
-                # Add other dependencies
-              ],
-              c_args: [
-                '-s', 'WASM=1',
-                '-s', 'USE_SDL=2',
-                '-s', 'ASSERTIONS=1',
-                '-s', 'ALLOW_MEMORY_GROWTH=1',
-              ],
-              link_args: [
-                '-s', 'WASM=1',
-                '-s', 'USE_SDL=2',
-                '-s', 'ASSERTIONS=1',
-                '-s', 'ALLOW_MEMORY_GROWTH=1',
-                '--preload-file', 'pc-bios@/usr/local/share/qemu/pc-bios'
-              ],
-              name_suffix: 'js',
-            )
-          endif
+          # Patch configure to skip unsupported checks
+          sed -i 's/check_define __linux__/true || &/' configure
+          sed -i 's/check_define __FreeBSD__/true || &/' configure
+          
+          # Create minimal configuration for WASM
+          cat > config-host.mak << 'EOF'
+          CONFIG_SDL=y
+          CONFIG_XEN=n
+          CONFIG_KVM=n
+          CONFIG_VNC=n
+          CONFIG_DOCS=n
+          CONFIG_TOOLS=n
+          CONFIG_GUEST_AGENT=n
           EOF
 
-      - name: Configure and Build
+      - name: Create Emscripten Build Environment
         run: |
           mkdir -p ${{ env.BUILD_DIR }}
           cd ${{ env.BUILD_DIR }}
           
+          cat > build.sh << 'EOF'
+          #!/bin/bash
+          set -ex
+          
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Configure with custom emscripten option
-          meson setup ../qemu-src \
-            -Demscripten=true \
-            --cross-file="$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
-            -Dtarget_list=i386-softmmu \
-            -Dsdl=enabled \
-            -Dxen=disabled \
-            -Dkvm=disabled \
-            -Dvnc=disabled \
-            -Ddocs=disabled \
-            -Dtools=disabled \
-            -Dguest_agent=disabled \
-            -Db_lto=true \
-            -Doptimization=3 \
-            -Ddebug=false \
-            -Dstrip=true \
-            -Db_pie=false
+          # Configure with minimal options
+          ../qemu-src/configure \
+            --cc=emcc \
+            --host-cc=emcc \
+            --ar=emar \
+            --target-list=i386-softmmu \
+            --enable-sdl \
+            --disable-xen \
+            --disable-kvm \
+            --disable-vnc \
+            --disable-docs \
+            --disable-tools \
+            --disable-guest-agent \
+            --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
+            --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
           
-          # Build
-          ninja -v
+          # Build core components
+          make -j$(nproc) qemu-system-i386
+          
+          # Rename output for WASM
+          mv qemu-system-i386 qemu-system-i386.js
+          EOF
+          
+          chmod +x build.sh
+
+      - name: Build QEMU
+        run: |
+          cd ${{ env.BUILD_DIR }}
+          ./build.sh
           
           # Verify output
           if [ -f "qemu-system-i386.js" ]; then
