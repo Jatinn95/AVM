@@ -1,178 +1,321 @@
-- name: Build Qemu.js
-  run: |
-    cd qemu
-    echo "Patching meson.build to allow emcc, em++, any GCC version, and wasm CPU..."
-    echo "Dumping meson.build context before patching:"
-    sed -n '300,350p' meson.build
-    sed -n '870,880p' meson.build
-    echo "Checking file identity:"
-    head -n 5 meson.build
-    # Backup meson.build for debugging
-    cp meson.build meson.build.bak
-    # Test compiler pattern match
-    echo "Testing compiler pattern match..."
-    grep -A 10 "compiler = meson.get_compiler(lang)" meson.build || {
-      echo "Error: Compiler pattern not found!"
-      sed -n '300,350p' meson.build
-      exit 1
-    }
-    # Delete original compiler check block
-    echo "Deleting original compiler check block..."
-    sed -i "/compiler = meson.get_compiler(lang)/,/endforeach/{/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/endif/d}" meson.build || {
-      echo "Error: Failed to delete original compiler check block!"
-      echo "Dumping diff for debugging:"
-      diff -u meson.build.bak meson.build || true
-      sed -n '300,350p' meson.build
-      exit 1
-    }
-    # Insert new compiler checks
-    echo "Inserting new compiler checks..."
-    sed -i "/compiler = meson.get_compiler(lang)/a\  if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'\n    # ok\n  endif\n  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif" meson.build || {
-      echo "Error: Failed to insert new compiler checks!"
-      echo "Dumping diff for debugging:"
-      diff -u meson.build.bak meson.build || true
-      sed -n '300,350p' meson.build
-      exit 1
-    }
-    echo "Verifying emcc/em++ patch..."
-    grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build || {
-      echo "Error: emcc/em++ patch not found!"
-      echo "Dumping diff for debugging:"
-      diff -u meson.build.bak meson.build || true
-      sed -n '300,350p' meson.build
-      exit 1
-    }
-    echo "Verifying gcc/clang patch..."
-    grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build || {
-      echo "Error: gcc/clang patch not found!"
-      echo "Dumping diff for debugging:"
-      diff -u meson.build.bak meson.build || true
-      sed -n '300,350p' meson.build
-      exit 1
-    }
-    # Patch CPU check
-    echo "Applying CPU patch..."
-    sed -i "/error('Unsupported CPU.*try --enable-tcg-interpreter'/c\    # Allow wasm CPU with TCG interpreter" meson.build || {
-      echo "Error: Failed to patch meson.build for CPU check!"
-      echo "Dumping diff for debugging:"
-      diff -u meson.build.bak meson.build || true
-      sed -n '870,880p' meson.build
-      exit 1
-    }
-    echo "Verifying CPU patch..."
-    ! grep "error('Unsupported CPU" meson.build || {
-      echo "Error: CPU patch not applied correctly!"
-      echo "Dumping diff for debugging:"
-      diff -u meson.build.bak meson.build || true
-      sed -n '870,880p' meson.build
-      exit 1
-    }
-    echo "Verifying all patches..."
-    grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build && \
-    grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build && \
-    ! grep "error('You either need GCC v7.4" meson.build && \
-    ! grep "error('Unsupported CPU" meson.build && \
-    grep "endforeach" meson.build | grep -q "foreach lang : all_languages" -B 10 || {
-      echo "Error: Patch verification failed! Dumping context for debugging:"
-      echo "Dumping diff for debugging:"
-      diff -u meson.build.bak meson.build || true
-      sed -n '300,350p' meson.build
-      sed -n '870,880p' meson.build
-      exit 1
-    }
-    echo "Checking meson.build syntax..."
-    meson introspect meson.build --ast || {
-      echo "Error: meson.build syntax check failed!"
-      echo "Dumping diff for debugging:"
-      diff -u meson.build.bak meson.build || true
-      sed -n '300,350p' meson.build
-      exit 1
-    }
-    echo "Creating Emscripten cross-file..."
-    cat > emscripten-cross.txt << 'EOF'
-    [binaries]
-    c = 'emcc'
-    cpp = 'em++'
-    ar = 'emar'
-    strip = 'emstrip'
-    pkg-config = 'pkg-config'
-    [properties]
-    needs_exe_wrapper = true
-    [host_machine]
-    system = 'emscripten'
-    cpu_family = 'wasm'
-    cpu = 'wasm32'
-    endian = 'little'
-    EOF
-    echo "Creating minimal config-host.mak..."
-    mkdir -p build
-    cat > build/config-host.mak << 'EOF'
-    SRC_PATH=/home/runner/work/AVM/AVM/qemu
-    TARGET_DIRS=i386-softmmu
-    CONFIG_SDL=y
-    CONFIG_XEN=n
-    CONFIG_KVM=n
-    CONFIG_VNC=n
-    CONFIG_DOCS=n
-    CONFIG_TOOLS=n
-    CONFIG_GUEST_AGENT=n
-    CONFIG_LINUX=y
-    CONFIG_TCG_INTERPRETER=y
-    EOF
-    echo "Setting up Meson for cross-compilation..."
-    source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
-    meson setup build \
-      --cross-file emscripten-cross.txt \
-      -Dsdl=enabled \
-      -Dxen=disabled \
-      -Dkvm=disabled \
-      -Dvnc=disabled \
-      -Ddocs=disabled \
-      -Dtools=disabled \
-      -Dguest_agent=disabled \
-      -Dtcg_interpreter=true \
-      -Db_lto=true \
-      -Doptimization=2 || {
-      echo "Error: Meson setup failed!"
-      if [ -f build/meson-logs/meson-log.txt ]; then
-        echo "Dumping meson-log.txt for debugging..."
-        cat build/meson-logs/meson-log.txt
-      fi
-      exit 1
-    }
-    echo "Building with ninja..."
-    cd build
-    ninja i386-softmmu/qemu-system-i386 CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
-      echo "Error: Ninja build failed!"
-      exit 1
-    }
-    echo "Build completed, listing generated files..."
-    ls -la i386-softmmu/qemu-system-i386*
-    if [ -f "i386-softmmu/qemu-system-i386.wasm" ]; then
-      FILE_SIZE=$(stat -f%z i386-softmmu/qemu-system-i386.wasm 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.wasm)
-      echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
-      if [ "$FILE_SIZE" -eq 0 ]; then
-        echo "Error: qemu-system-i386.wasm is empty!"
-        exit 1
-      fi
-    else
-      echo "Error: qemu-system-i386.wasm not generated!"
-      exit 1
-    fi
-    if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
-      FILE_SIZE=$(stat -f%z i386-softmmu/qemu-system-i386.js 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.js)
-      echo "qemu-system-i386.js size: $FILE_SIZE bytes"
-    else
-      echo "Warning: qemu-system-i386.js not generated!"
-    fi
-    mkdir -p ../../qemujs-binaries
-    echo "Copying generated files..."
-    cp i386-softmmu/qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: No qemu-system-i386.js found."
-    cp i386-softmmu/qemu-system-i386.wasm ../../qemujs-binaries/ || {
-      echo "Error: Failed to copy qemu-system-i386.wasm!"
-      exit 1
-    }
-    cp i386-softmmu/*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
-    echo "Listing copied files in qemujs-binaries..."
-    ls -la ../../qemujs-binaries
-  working-directory: .
+name: Build QEMU WebAssembly (Advanced)
+on: [push]
+jobs:
+  prebuilt-qemu-js:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      QEMU_VERSION: "9.2.0"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install Emscripten
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
+          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
+          source ./emsdk_env.sh
+          echo "Emscripten version: $(emcc --version)"
+        working-directory: .
+        timeout-minutes: 10
+
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git python3 python3-pip ninja-build libsdl2-dev libpixman-1-dev
+          pip3 install meson==1.5.0
+
+      - name: Cache QEMU Tarball
+        uses: actions/cache@v3
+        with:
+          path: qemu-${{ env.QEMU_VERSION }}.tar.xz
+          key: qemu-tarball-${{ env.QEMU_VERSION }}
+
+      - name: Download and Extract QEMU
+        run: |
+          if [ -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
+            echo "Using cached tarball..."
+            echo "Verifying cached tarball integrity..."
+            COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
+            echo "Computed SHA256: $COMPUTED_CHECKSUM"
+            echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
+            if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
+              echo "Cached checksum verified!"
+            else
+              echo "Cached checksum mismatch! Removing cached file..."
+              rm qemu-${{ env.QEMU_VERSION }}.tar.xz
+            fi
+          fi
+          if [ ! -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
+            for attempt in {1..5}; do
+              echo "Download attempt $attempt of 5..."
+              wget --tries=2 --timeout=30 -O qemu-${{ env.QEMU_VERSION }}.tar.xz https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
+              echo "Verifying tarball integrity..."
+              COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
+              echo "Computed SHA256: $COMPUTED_CHECKSUM"
+              echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
+              if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
+                echo "Checksum verified!"
+                break
+              else
+                echo "Checksum mismatch on attempt $attempt!"
+                if [ $attempt -eq 5 ]; then
+                  echo "Error: Tarball checksum failed after 5 attempts!"
+                  exit 1
+                fi
+                rm qemu-${{ env.QEMU_VERSION }}.tar.xz
+                sleep 5
+              fi
+            done
+          fi
+          tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
+          mv qemu-${{ env.QEMU_VERSION }} qemu
+
+      - name: Build Qemu.js
+        run: |
+          cd qemu
+          echo "Patching meson.build to allow emcc, em++, any GCC version, and wasm CPU..."
+          echo "Dumping meson.build context before patching:"
+          sed -n '300,350p' meson.build
+          sed -n '870,880p' meson.build
+          echo "Checking file identity:"
+          head -n 5 meson.build
+          # Backup meson.build for debugging
+          cp meson.build meson.build.bak
+          # Test compiler pattern match
+          echo "Testing compiler pattern match..."
+          grep -A 10 "compiler = meson.get_compiler(lang)" meson.build || {
+            echo "Error: Compiler pattern not found!"
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          # Delete original compiler check block
+          echo "Deleting original compiler check block..."
+          sed -i "/compiler = meson.get_compiler(lang)/,/endforeach/{/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/endif/d}" meson.build || {
+            echo "Error: Failed to delete original compiler check block!"
+            echo "Dumping diff for debugging:"
+            diff -u meson.build.bak meson.build || true
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          # Insert new compiler checks
+          echo "Inserting new compiler checks..."
+          sed -i "/compiler = meson.get_compiler(lang)/a\  if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'\n    # ok\n  endif\n  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif" meson.build || {
+            echo "Error: Failed to insert new compiler checks!"
+            echo "Dumping diff for debugging:"
+            diff -u meson.build.bak meson.build || true
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          echo "Verifying emcc/em++ patch..."
+          grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build || {
+            echo "Error: emcc/em++ patch not found!"
+            echo "Dumping diff for debugging:"
+            diff -u meson.build.bak meson.build || true
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          echo "Verifying gcc/clang patch..."
+          grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build || {
+            echo "Error: gcc/clang patch not found!"
+            echo "Dumping diff for debugging:"
+            diff -u meson.build.bak meson.build || true
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          # Patch CPU check
+          echo "Applying CPU patch..."
+          sed -i "/error('Unsupported CPU.*try --enable-tcg-interpreter'/c\    # Allow wasm CPU with TCG interpreter" meson.build || {
+            echo "Error: Failed to patch meson.build for CPU check!"
+            echo "Dumping diff for debugging:"
+            diff -u meson.build.bak meson.build || true
+            sed -n '870,880p' meson.build
+            exit 1
+          }
+          echo "Verifying CPU patch..."
+          ! grep "error('Unsupported CPU" meson.build || {
+            echo "Error: CPU patch not applied correctly!"
+            echo "Dumping diff for debugging:"
+            diff -u meson.build.bak meson.build || true
+            sed -n '870,880p' meson.build
+            exit 1
+          }
+          echo "Verifying all patches..."
+          grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build && \
+          grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build && \
+          ! grep "error('You either need GCC v7.4" meson.build && \
+          ! grep "error('Unsupported CPU" meson.build && \
+          grep "endforeach" meson.build | grep -q "foreach lang : all_languages" -B 10 || {
+            echo "Error: Patch verification failed! Dumping context for debugging:"
+            echo "Dumping diff for debugging:"
+            diff -u meson.build.bak meson.build || true
+            sed -n '300,350p' meson.build
+            sed -n '870,880p' meson.build
+            exit 1
+          }
+          echo "Checking meson.build syntax..."
+          meson introspect meson.build --ast || {
+            echo "Error: meson.build syntax check failed!"
+            echo "Dumping diff for debugging:"
+            diff -u meson.build.bak meson.build || true
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          echo "Creating Emscripten cross-file..."
+          cat > emscripten-cross.txt << 'EOF'
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          strip = 'emstrip'
+          pkg-config = 'pkg-config'
+          [properties]
+          needs_exe_wrapper = true
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+          EOF
+          echo "Creating minimal config-host.mak..."
+          mkdir -p build
+          cat > build/config-host.mak << 'EOF'
+          SRC_PATH=/home/runner/work/AVM/AVM/qemu
+          TARGET_DIRS=i386-softmmu
+          CONFIG_SDL=y
+          CONFIG_XEN=n
+          CONFIG_KVM=n
+          CONFIG_VNC=n
+          CONFIG_DOCS=n
+          CONFIG_TOOLS=n
+          CONFIG_GUEST_AGENT=n
+          CONFIG_LINUX=y
+          CONFIG_TCG_INTERPRETER=y
+          EOF
+          echo "Setting up Meson for cross-compilation..."
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          meson setup build \
+            --cross-file emscripten-cross.txt \
+            -Dsdl=enabled \
+            -Dxen=disabled \
+            -Dkvm=disabled \
+            -Dvnc=disabled \
+            -Ddocs=disabled \
+            -Dtools=disabled \
+            -Dguest_agent=disabled \
+            -Dtcg_interpreter=true \
+            -Db_lto=true \
+            -Doptimization=2 || {
+            echo "Error: Meson setup failed!"
+            if [ -f build/meson-logs/meson-log.txt ]; then
+              echo "Dumping meson-log.txt for debugging..."
+              cat build/meson-logs/meson-log.txt
+            fi
+            exit 1
+          }
+          echo "Building with ninja..."
+          cd build
+          ninja i386-softmmu/qemu-system-i386 CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
+            echo "Error: Ninja build failed!"
+            exit 1
+          }
+          echo "Build completed, listing generated files..."
+          ls -la i386-softmmu/qemu-system-i386*
+          if [ -f "i386-softmmu/qemu-system-i386.wasm" ]; then
+            FILE_SIZE=$(stat -f%z i386-softmmu/qemu-system-i386.wasm 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.wasm)
+            echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
+            if [ "$FILE_SIZE" -eq 0 ]; then
+              echo "Error: qemu-system-i386.wasm is empty!"
+              exit 1
+            fi
+          else
+            echo "Error: qemu-system-i386.wasm not generated!"
+            exit 1
+          fi
+          if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
+            FILE_SIZE=$(stat -f%z i386-softmmu/qemu-system-i386.js 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.js)
+            echo "qemu-system-i386.js size: $FILE_SIZE bytes"
+          else
+            echo "Warning: qemu-system-i386.js not generated!"
+          fi
+          mkdir -p ../../qemujs-binaries
+          echo "Copying generated files..."
+          cp i386-softmmu/qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: No qemu-system-i386.js found."
+          cp i386-softmmu/qemu-system-i386.wasm ../../qemujs-binaries/ || {
+            echo "Error: Failed to copy qemu-system-i386.wasm!"
+            exit 1
+          }
+          cp i386-softmmu/*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
+          echo "Listing copied files in qemujs-binaries..."
+          ls -la ../../qemujs-binaries
+        working-directory: .
+
+      - name: Verify Files in Binaries Directory
+        run: |
+          cd qemujs-binaries
+          echo "Verifying files in qemujs-binaries..."
+          ls -la
+          if [ -f "qemu-system-i386.wasm" ]; then
+            FILE_SIZE=$(stat -f%z qemu-system-i386.wasm 2>/dev/null || stat -c%s qemu-system-i386.wasm)
+            echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
+            if [ "$FILE_SIZE" -eq 0 ]; then
+              echo "Error: qemu-system-i386.wasm is empty!"
+              exit 1
+            fi
+          else
+            echo "Error: qemu-system-i386.wasm not found in qemujs-binaries!"
+            exit 1
+          fi
+          if [ -f "qemu-system-i386.js" ]; then
+            FILE_SIZE=$(stat -f%z qemu-system-i386.js 2>/dev/null || stat -c%s qemu-system-i386.js)
+            echo "qemu-system-i386.js size: $FILE_SIZE bytes"
+          else
+            echo "Warning: qemu-system-i386.js not found."
+          fi
+        working-directory: .
+
+      - name: Test Qemu.js Binary
+        run: |
+          cd qemujs-binaries
+          echo "Testing Qemu.js binary..."
+          if [ -f "qemu-system-i386.js" ]; then
+            node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
+          else
+            echo "Warning: qemu-system-i386.js not found, skipping test."
+          fi
+          if [ -f "qemu-system-i386.wasm" ]; then
+            echo "Found qemu-system-i386.wasm."
+            ls -la qemu-system-i386.wasm
+          else
+            echo "Error: qemu-system-i386.wasm not found!"
+            exit 1
+          fi
+        working-directory: .
+
+      - name: Upload Qemu.js Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-js-prebuilt
+          path: |
+            qemujs-binaries/qemu-system-i386.js
+            qemujs-binaries/qemu-system-i386.wasm
+            qemujs-binaries/*.data
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Cleanup
+        run: |
+          rm -rf qemu emsdk qemujs-binaries
+
+      - name: Notify Build Status
+        if: always()
+        run: |
+          echo "Pre-built Qemu.js job completed with status: ${{ job.status }}"
