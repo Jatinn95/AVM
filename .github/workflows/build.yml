@@ -49,6 +49,8 @@ jobs:
           # Patch configure to accept Emscripten compiler
           sed -i 's/check_define __linux__/true || &/' configure
           sed -i 's/check_define __FreeBSD__/true || &/' configure
+          # Disable 64-bit compilation attempts
+          sed -i 's/-m64//g' configure meson.build
 
       - name: Configure and Build QEMU
         run: |
@@ -58,26 +60,20 @@ jobs:
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Create wrapper scripts that QEMU expects
-          cat > emgcc << 'EOF'
-          #!/bin/bash
-          exec emcc "$@"
-          EOF
-          
-          cat > emg++ << 'EOF'
-          #!/bin/bash
-          exec em++ "$@"
-          EOF
-          
-          chmod +x emgcc emg++
+          # Create proper compiler symlinks
+          ln -sf "$(which emcc)" emcc
+          ln -sf "$(which em++)" em++
+          ln -sf "$(which emar)" emar
+          ln -sf "$(which emstrip)" emstrip
           export PATH="$PWD:$PATH"
           
-          # Configure QEMU
+          # Configure with explicit compiler settings
           ../qemu-src/configure \
-            --cross-prefix="" \
-            --cc=emgcc \
-            --cxx=emg++ \
-            --host-cc=emgcc \
+            --cc="$(which emcc)" \
+            --cxx="$(which em++)" \
+            --ar="$(which emar)" \
+            --nm="$(which emnm)" \
+            --strip="$(which emstrip)" \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
