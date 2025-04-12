@@ -91,10 +91,16 @@ jobs:
           # Patch to allow emcc and em++ early in the compiler check
           sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'\n    # ok\n  endif\n  /}" meson.build || {
             echo "Error: Failed to apply emcc/em++ patch!"
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          echo "Verifying emcc/em++ patch..."
+          grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build || {
+            echo "Error: emcc/em++ patch not found!"
             exit 1
           }
           # Patch to replace entire compiler check block
-          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/endif/d" meson.build || {
+          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/error('You either need GCC v7.4.*')/d" meson.build || {
             echo "Error: Failed to remove original compiler check block!"
             sed -n '300,350p' meson.build
             exit 1
@@ -104,11 +110,21 @@ jobs:
             sed -n '300,350p' meson.build
             exit 1
           }
+          echo "Verifying gcc/clang patch..."
+          grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build || {
+            echo "Error: gcc/clang patch not found!"
+            exit 1
+          }
           # Patch to remove CPU check error for wasm
           sed -i "/error('Unsupported CPU.*try --enable-tcg-interpreter'/c\    # Allow wasm CPU with TCG interpreter" meson.build || {
             echo "Error: Failed to patch meson.build for CPU check!"
             echo "Dumping updated meson.build snippet:"
             sed -n '870,880p' meson.build
+            exit 1
+          }
+          echo "Verifying CPU patch..."
+          ! grep "error('Unsupported CPU" meson.build || {
+            echo "Error: CPU patch not applied correctly!"
             exit 1
           }
           echo "Verifying patches..."
