@@ -87,15 +87,15 @@ jobs:
           sed -n '300,350p' meson.build
           echo "Checking file identity:"
           head -n 5 meson.build
-          # Patch to allow emcc by adding early check
-          sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc'\n    # ok\n  /}" meson.build || {
+          # Patch to allow emcc by adding early check with proper endif
+          sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc'\n    # ok\n  endif\n  /}" meson.build || {
             echo "Error: Failed to patch meson.build!"
             echo "Dumping updated meson.build snippet:"
             sed -n '300,350p' meson.build
             exit 1
           }
           echo "Verifying patch..."
-          grep "if compiler.get_id() == 'emcc'" meson.build || {
+          grep "if compiler.get_id() == 'emcc'" meson.build && grep "endif" meson.build || {
             echo "Error: Patch verification failed! Dumping context for debugging:"
             sed -n '300,350p' meson.build
             exit 1
@@ -204,7 +204,7 @@ jobs:
             exit 1
           fi
           if [ -f "qemu-system-i386.js" ]; then
-            FILE_SIZE=$(stat -f%z qemu-system-i386.js 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.js)
+            FILE_SIZE=$(stat -f%z qemu-system-i386.js 2>/dev/null || stat -c%s qemu-system-i386.js)
             echo "qemu-system-i386.js size: $FILE_SIZE bytes"
           else
             echo "Warning: qemu-system-i386.js not found."
