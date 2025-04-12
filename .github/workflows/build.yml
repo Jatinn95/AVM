@@ -43,7 +43,40 @@ jobs:
           mv qemu-${{ env.QEMU_VERSION }} qemu-src
           rm qemu-${{ env.QEMU_VERSION }}.tar.xz
 
-      - name: Build QEMU with Emscripten Directly
+      - name: Patch QEMU Build System
+        run: |
+          cd qemu-src
+          # Create a custom target for Emscripten
+          cat >> meson.build << 'EOF'
+          if get_option('emscripten')
+            executable('qemu-system-i386.js',
+              sources: [
+                'softmmu/main.c',
+                # Add other necessary source files
+              ],
+              dependencies: [
+                dependency('sdl2'),
+                # Add other dependencies
+              ],
+              c_args: [
+                '-s', 'WASM=1',
+                '-s', 'USE_SDL=2',
+                '-s', 'ASSERTIONS=1',
+                '-s', 'ALLOW_MEMORY_GROWTH=1',
+              ],
+              link_args: [
+                '-s', 'WASM=1',
+                '-s', 'USE_SDL=2',
+                '-s', 'ASSERTIONS=1',
+                '-s', 'ALLOW_MEMORY_GROWTH=1',
+                '--preload-file', 'pc-bios@/usr/local/share/qemu/pc-bios'
+              ],
+              name_suffix: 'js',
+            )
+          endif
+          EOF
+
+      - name: Configure and Build
         run: |
           mkdir -p ${{ env.BUILD_DIR }}
           cd ${{ env.BUILD_DIR }}
@@ -51,24 +84,29 @@ jobs:
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Configure environment
-          export CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 -O3"
-          export LDFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 -O3"
-          export EMCC_CFLAGS="-I$PWD/../qemu-src/include"
+          # Configure with custom emscripten option
+          meson setup ../qemu-src \
+            -Demscripten=true \
+            --cross-file="$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
+            -Dtarget_list=i386-softmmu \
+            -Dsdl=enabled \
+            -Dxen=disabled \
+            -Dkvm=disabled \
+            -Dvnc=disabled \
+            -Ddocs=disabled \
+            -Dtools=disabled \
+            -Dguest_agent=disabled \
+            -Db_lto=true \
+            -Doptimization=3 \
+            -Ddebug=false \
+            -Dstrip=true \
+            -Db_pie=false
           
-          # Build core components
-          emcc $CFLAGS \
-            -c ../qemu-src/softmmu/main.c \
-            -o qemu-main.o
-          
-          # Link final binary
-          emcc $LDFLAGS \
-            qemu-main.o \
-            -o qemu-system-i386.html \
-            --preload-file ../qemu-src/pc-bios
+          # Build
+          ninja -v
           
           # Verify output
-          if [ -f "qemu-system-i386.wasm" ]; then
+          if [ -f "qemu-system-i386.js" ]; then
             echo "Build successful"
             mkdir -p ${{ env.OUTPUT_DIR }}
             cp qemu-system-i386.* ${{ env.OUTPUT_DIR }}/
