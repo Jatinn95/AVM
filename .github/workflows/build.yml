@@ -60,20 +60,18 @@ jobs:
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Create proper compiler symlinks
+          # Create proper compiler symlinks with expected names
           ln -sf "$(which emcc)" emcc
           ln -sf "$(which em++)" em++
           ln -sf "$(which emar)" emar
           ln -sf "$(which emstrip)" emstrip
           export PATH="$PWD:$PATH"
           
-          # Configure with explicit compiler settings
+          # Configure using cross-prefix approach
           ../qemu-src/configure \
-            --cc="$(which emcc)" \
-            --cxx="$(which em++)" \
-            --ar="$(which emar)" \
-            --nm="$(which emnm)" \
-            --strip="$(which emstrip)" \
+            --cross-prefix="" \
+            --cc=emcc \
+            --host-cc=emcc \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
