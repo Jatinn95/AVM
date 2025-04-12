@@ -82,9 +82,10 @@ jobs:
       - name: Build Qemu.js
         run: |
           cd qemu
-          echo "Patching meson.build to allow emcc and any GCC version..."
+          echo "Patching meson.build to allow emcc, any GCC version, and wasm CPU..."
           echo "Dumping meson.build context for debugging:"
           sed -n '300,350p' meson.build
+          sed -n '870,880p' meson.build
           echo "Checking file identity:"
           head -n 5 meson.build
           # Patch to allow emcc early in the compiler check
@@ -92,7 +93,7 @@ jobs:
           # Patch to remove GCC version check globally
           sed -i "s/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/if compiler.get_id() == 'gcc'/" meson.build
           # Patch to remove CPU check error for wasm
-          sed -i "/error('Unsupported CPU @0@, try --enable-tcg-interpreter')/c\    # Allow wasm CPU with TCG interpreter" meson.build || {
+          sed -i "/error('Unsupported CPU.*try --enable-tcg-interpreter'/c\    # Allow wasm CPU with TCG interpreter" meson.build || {
             echo "Error: Failed to patch meson.build for CPU check!"
             echo "Dumping updated meson.build snippet:"
             sed -n '870,880p' meson.build
