@@ -44,53 +44,41 @@ jobs:
           if [ -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
             echo "Using cached tarball..."
             echo "Verifying cached tarball integrity..."
-            COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz#!/bin/bash
-# Define the version and checksum
-QEMU_VERSION="9.2.0"
-EXPECTED_CHECKSUM="f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
-
-# Check if the tarball exists
-if [ -f "qemu-${QEMU_VERSION}.tar.xz" ]; then
-    echo "Using cached tarball..."
-    echo "Verifying cached tarball integrity..."
-    COMPUTED_CHECKSUM=$(sha256sum qemu-${QEMU_VERSION}.tar.xz | cut -d' ' -f1)
-    echo "Computed SHA256: $COMPUTED_CHECKSUM"
-    echo "Expected SHA256: $EXPECTED_CHECKSUM"
-    if echo "$EXPECTED_CHECKSUM  qemu-${QEMU_VERSION}.tar.xz" | sha256sum -c; then
-        echo "Cached checksum verified!"
-    else
-        echo "Cached checksum mismatch! Removing cached file..."
-        rm qemu-${QEMU_VERSION}.tar.xz
-    fi
-fi
-
-# Download the tarball if it doesn't exist
-if [ ! -f "qemu-${QEMU_VERSION}.tar.xz" ]; then
-    for attempt in {1..5}; do
-        echo "Download attempt $attempt of 5..."
-        wget --tries=2 --timeout=30 -O qemu-${QEMU_VERSION}.tar.xz https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz
-        echo "Verifying tarball integrity..."
-        COMPUTED_CHECKSUM=$(sha256sum qemu-${QEMU_VERSION}.tar.xz | cut -d' ' -f1)
-        echo "Computed SHA256: $COMPUTED_CHECKSUM"
-        echo "Expected SHA256: $EXPECTED_CHECKSUM"
-        if echo "$EXPECTED_CHECKSUM  qemu-${QEMU_VERSION}.tar.xz" | sha256sum -c; then
-            echo "Checksum verified!"
-            break
-        else
-            echo "Checksum mismatch on attempt $attempt!"
-            if [ $attempt -eq 5 ]; then
-                echo "Error: Tarball checksum failed after 5 attempts!"
-                exit 1
+            COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
+            echo "Computed SHA256: $COMPUTED_CHECKSUM"
+            echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
+            if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
+              echo "Cached checksum verified!"
+            else
+              echo "Cached checksum mismatch! Removing cached file..."
+              rm qemu-${{ env.QEMU_VERSION }}.tar.xz
             fi
-            rm qemu-${QEMU_VERSION}.tar.xz
-            sleep 5
-        fi
-    done
-fi
+          fi
+          if [ ! -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
+            for attempt in {1..5}; do
+              echo "Download attempt $attempt of 5..."
+              wget --tries=2 --timeout=30 -O qemu-${{ env.QEMU_VERSION }}.tar.xz https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
+              echo "Verifying tarball integrity..."
+              COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
+              echo "Computed SHA256: $COMPUTED_CHECKSUM"
+              echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
+              if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
+                echo "Checksum verified!"
+                break
+              else
+                echo "Checksum mismatch on attempt $attempt!"
+                if [ $attempt -eq 5 ]; then
+                  echo "Error: Tarball checksum failed after 5 attempts!"
+                  exit 1
+                fi
+                rm qemu-${{ env.QEMU_VERSION }}.tar.xz
+                sleep 5
+              fi
+            done
+          fi
+          tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
+          mv qemu-${{ env.QEMU_VERSION }} qemu
 
-# Extract the tarball and rename the directory
-tar -xf qemu-${QEMU_VERSION}.tar.xz
-mv qemu-${QEMU_VERSION} qemu
       - name: Build Qemu.js
         run: |
           cd qemu
