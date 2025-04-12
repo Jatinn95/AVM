@@ -90,9 +90,9 @@ jobs:
           head -n 5 meson.build
           # Patch to allow emcc and em++ early in the compiler check
           sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'\n    # ok\n  endif\n  /}" meson.build
-          # Patch to replace entire compiler check block
-          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/error('You either need GCC v7.4.*')/{/error('You either need GCC v7.4.*')/d;}" meson.build
-          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/endif/c\  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif" meson.build
+          # Patch to replace entire compiler check block, including else clause
+          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/error('You either need GCC v7.4.*')/d" meson.build
+          sed -i "/foreach lang : all_languages/a\  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif" meson.build
           # Patch to remove CPU check error for wasm
           sed -i "/error('Unsupported CPU.*try --enable-tcg-interpreter'/c\    # Allow wasm CPU with TCG interpreter" meson.build || {
             echo "Error: Failed to patch meson.build for CPU check!"
@@ -101,7 +101,11 @@ jobs:
             exit 1
           }
           echo "Verifying patches..."
-          grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build && grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build && ! grep "error('You either need GCC v7.4" meson.build && ! grep "error('Unsupported CPU" meson.build || {
+          grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build && \
+          grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build && \
+          ! grep "error('You either need GCC v7.4" meson.build && \
+          ! grep "error('Unsupported CPU" meson.build && \
+          ! grep -A 5 "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build | grep -q "^[[:space:]]*else" || {
             echo "Error: Patch verification failed! Dumping context for debugging:"
             sed -n '300,350p' meson.build
             sed -n '870,880p' meson.build
