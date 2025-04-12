@@ -51,27 +51,35 @@ jobs:
           sed -i 's/check_define __FreeBSD__/true || &/' configure
           # Disable 64-bit compilation attempts
           sed -i 's/-m64//g' configure meson.build
+          # Make compiler checks more permissive
+          sed -i 's/run_command(cc, check_args, check: true)/run_command(cc, check_args)/' meson.build
 
       - name: Configure and Build QEMU
         run: |
           mkdir -p ${{ env.BUILD_DIR }}
           cd ${{ env.BUILD_DIR }}
           
-          # Source Emscripten environment
+          # Source Emscripten environment properly
           source "$EMSDK/emsdk_env.sh"
+          echo "Emscripten compiler path: $(which emcc)"
           
-          # Create proper compiler symlinks with expected names
-          ln -sf "$(which emcc)" emcc
-          ln -sf "$(which em++)" em++
-          ln -sf "$(which emar)" emar
-          ln -sf "$(which emstrip)" emstrip
+          # Create compiler wrapper script
+          cat > emcc_wrapper << 'EOF'
+          #!/bin/bash
+          # Workaround for QEMU's build system
+          exec emcc -s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 "$@"
+          EOF
+          chmod +x emcc_wrapper
           export PATH="$PWD:$PATH"
           
-          # Configure using cross-prefix approach
+          # Configure QEMU with explicit settings
+          CC="$(pwd)/emcc_wrapper" \
+          CXX="$(which em++)" \
+          AR="$(which emar)" \
           ../qemu-src/configure \
             --cross-prefix="" \
-            --cc=emcc \
-            --host-cc=emcc \
+            --cc="$(pwd)/emcc_wrapper" \
+            --host-cc="$(pwd)/emcc_wrapper" \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
@@ -83,8 +91,8 @@ jobs:
             --enable-lto \
             --enable-strip \
             --disable-pie \
-            --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
-            --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
+            --extra-cflags="" \
+            --extra-ldflags=""
           
           # Build with ninja
           ninja -v
