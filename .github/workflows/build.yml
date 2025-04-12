@@ -88,26 +88,15 @@ jobs:
           sed -n '870,880p' meson.build
           echo "Checking file identity:"
           head -n 5 meson.build
-          # Patch to allow emcc and em++ early in the compiler check
-          sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'\n    # ok\n  endif\n  /}" meson.build || {
-            echo "Error: Failed to apply emcc/em++ patch!"
+          # Patch to replace compiler check block with emcc/em++ and gcc/clang checks
+          sed -i "/foreach lang : all_languages/,/endforeach/{/compiler = meson.get_compiler(lang)/{n;s/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4').*endif/if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'\n    # ok\n  endif\n  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif/}}" meson.build || {
+            echo "Error: Failed to apply compiler patches!"
             sed -n '300,350p' meson.build
             exit 1
           }
           echo "Verifying emcc/em++ patch..."
           grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build || {
             echo "Error: emcc/em++ patch not found!"
-            exit 1
-          }
-          # Patch to remove original compiler check block
-          sed -i "/foreach lang : all_languages/,/endforeach/{/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/endif/d}" meson.build || {
-            echo "Error: Failed to remove original compiler check block!"
-            sed -n '300,350p' meson.build
-            exit 1
-          }
-          # Insert gcc/clang patch after emcc/em++
-          sed -i "/if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'/{n;s/endif/endif\n  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif/}" meson.build || {
-            echo "Error: Failed to insert gcc/clang patch!"
             sed -n '300,350p' meson.build
             exit 1
           }
