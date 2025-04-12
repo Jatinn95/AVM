@@ -43,25 +43,41 @@ jobs:
           mv qemu-${{ env.QEMU_VERSION }} qemu-src
           rm qemu-${{ env.QEMU_VERSION }}.tar.xz
 
+      - name: Patch QEMU Build System
+        run: |
+          cd qemu-src
+          # Patch configure to accept Emscripten compiler
+          sed -i 's/check_define __linux__/true || &/' configure
+          sed -i 's/check_define __FreeBSD__/true || &/' configure
+
       - name: Configure and Build QEMU
         run: |
           mkdir -p ${{ env.BUILD_DIR }}
           cd ${{ env.BUILD_DIR }}
           
-          # Source Emscripten environment properly
+          # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
-          echo "Emscripten path: $(which emcc)"
           
-          # Create symlinks that QEMU expects
-          ln -sf "$(which emcc)" emcc
-          ln -sf "$(which em++)" em++
-          ln -sf "$(which emar)" emar
-          ln -sf "$(which emstrip)" emstrip
+          # Create wrapper scripts that QEMU expects
+          cat > emgcc << 'EOF'
+          #!/bin/bash
+          exec emcc "$@"
+          EOF
+          
+          cat > emg++ << 'EOF'
+          #!/bin/bash
+          exec em++ "$@"
+          EOF
+          
+          chmod +x emgcc emg++
           export PATH="$PWD:$PATH"
           
-          # Configure QEMU with cross-compilation prefix
+          # Configure QEMU
           ../qemu-src/configure \
-            --cross-prefix=em \
+            --cross-prefix="" \
+            --cc=emgcc \
+            --cxx=emg++ \
+            --host-cc=emgcc \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
@@ -95,13 +111,6 @@ jobs:
           cp ${{ env.BUILD_DIR }}/qemu-system-i386.wasm ${{ env.OUTPUT_DIR }}/
           cp ${{ env.BUILD_DIR }}/qemu-system-i386.js ${{ env.OUTPUT_DIR }}/ 2>/dev/null || true
           cp ${{ env.BUILD_DIR }}/*.data ${{ env.OUTPUT_DIR }}/ 2>/dev/null || true
-          
-          cat > ${{ env.OUTPUT_DIR }}/test.sh << 'EOF'
-          #!/bin/bash
-          echo "Testing QEMU WASM build..."
-          node qemu-system-i386.wasm --version || echo "Version check completed"
-          EOF
-          chmod +x ${{ env.OUTPUT_DIR }}/test.sh
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
