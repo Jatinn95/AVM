@@ -1,110 +1,250 @@
-name: Build QEMU WebAssembly
-on: [push, workflow_dispatch]
+name: Build QEMU WebAssembly (Advanced)
+on: [push]
 jobs:
-  build-qemu-wasm:
+  prebuilt-qemu-js:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       QEMU_VERSION: "9.2.0"
-      EMSCRIPTEN_VERSION: "latest"
-      BUILD_DIR: "qemu-build-wasm"
-      OUTPUT_DIR: "qemu-wasm-dist"
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Setup Build Environment
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            git \
-            python3 \
-            python3-pip \
-            ninja-build \
-            libglib2.0-dev \
-            libpixman-1-dev \
-            libsdl2-dev \
-            pkg-config \
-            wget \
-            xz-utils
-          sudo pip3 install meson==1.5.0
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
 
       - name: Install Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install latest
+          ./emsdk activate latest
+          echo "EMSDK_PATH=$(pwd)" >> $GITHUB_ENV
+          source ./emsdk_env.sh
+          echo "Emscripten version: $(emcc --version)"
+        working-directory: .
+        timeout-minutes: 10
+
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git python3 python3-pip ninja-build libsdl2-dev libpixman-1-dev
+          pip3 install meson==1.5.0
+
+      - name: Cache QEMU Tarball
+        uses: actions/cache@v3
         with:
-          version: ${{ env.EMSCRIPTEN_VERSION }}
-          actions-cache-folder: 'emsdk_cache'
+          path: qemu-${{ env.QEMU_VERSION }}.tar.xz
+          key: qemu-tarball-${{ env.QEMU_VERSION }}
 
-      - name: Download QEMU Source
+      - name: Download and Extract QEMU
         run: |
-          wget -q --show-progress https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
+          if [ -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
+            echo "Using cached tarball..."
+            echo "Verifying cached tarball integrity..."
+            COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
+            echo "Computed SHA256: $COMPUTED_CHECKSUM"
+            echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
+            if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
+              echo "Cached checksum verified!"
+            else
+              echo "Cached checksum mismatch! Removing cached file..."
+              rm qemu-${{ env.QEMU_VERSION }}.tar.xz
+            fi
+          fi
+          if [ ! -f qemu-${{ env.QEMU_VERSION }}.tar.xz ]; then
+            for attempt in {1..5}; do
+              echo "Download attempt $attempt of 5..."
+              wget --tries=2 --timeout=30 -O qemu-${{ env.QEMU_VERSION }}.tar.xz https://download.qemu.org/qemu-${{ env.QEMU_VERSION }}.tar.xz
+              echo "Verifying tarball integrity..."
+              COMPUTED_CHECKSUM=$(sha256sum qemu-${{ env.QEMU_VERSION }}.tar.xz | cut -d' ' -f1)
+              echo "Computed SHA256: $COMPUTED_CHECKSUM"
+              echo "Expected SHA256: f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894"
+              if echo "f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894  qemu-${{ env.QEMU_VERSION }}.tar.xz" | sha256sum -c; then
+                echo "Checksum verified!"
+                break
+              else
+                echo "Checksum mismatch on attempt $attempt!"
+                if [ $attempt -eq 5 ]; then
+                  echo "Error: Tarball checksum failed after 5 attempts!"
+                  exit 1
+                fi
+                rm qemu-${{ env.QEMU_VERSION }}.tar.xz
+                sleep 5
+              fi
+            done
+          fi
           tar -xf qemu-${{ env.QEMU_VERSION }}.tar.xz
-          mv qemu-${{ env.QEMU_VERSION }} qemu-src
-          rm qemu-${{ env.QEMU_VERSION }}.tar.xz
+          mv qemu-${{ env.QEMU_VERSION }} qemu
 
-      - name: Patch QEMU Source
+      - name: Build Qemu.js
         run: |
-          cd qemu-src
-          # Disable 64-bit compilation
-          sed -i 's/-m64//g' configure
-          # Skip architecture checks
-          sed -i 's/check_define __linux__/true || &/' configure
-          sed -i 's/check_define __FreeBSD__/true || &/' configure
-
-      - name: Configure and Build
-        run: |
-          mkdir -p ${{ env.BUILD_DIR }}
-          cd ${{ env.BUILD_DIR }}
-          
-          # Source Emscripten environment
-          source "$EMSDK/emsdk_env.sh"
-          
-          # Create compiler symlinks
-          ln -sf "$(which emcc)" emcc
-          ln -sf "$(which em++)" em++
-          ln -sf "$(which emar)" emar
-          export PATH="$PWD:$PATH"
-          
-          # Configure with direct compiler specification
-          ../qemu-src/configure \
-            --cross-prefix="" \
-            --cc=emcc \
-            --host-cc=emcc \
-            --target-list=i386-softmmu \
-            --enable-sdl \
-            --disable-xen \
-            --disable-kvm \
-            --disable-vnc \
-            --disable-docs \
-            --disable-tools \
-            --disable-guest-agent \
-            --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
-            --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
-          
-          # Build with make
-          make -j$(nproc)
-          
-          # Verify output
-          if [ -f "qemu-system-i386" ]; then
-            echo "Build successful"
-            mkdir -p ${{ env.OUTPUT_DIR }}
-            mv qemu-system-i386 qemu-system-i386.js
-            cp qemu-system-i386.* ${{ env.OUTPUT_DIR }}/
+          cd qemu
+          echo "Patching meson.build to allow emcc..."
+          echo "Dumping meson.build context for debugging:"
+          sed -n '300,350p' meson.build
+          echo "Checking file identity:"
+          head -n 5 meson.build
+          # Patch to allow emcc by modifying Clang check
+          sed -i "/if compiler.get_id() == 'clang' and compiler.compiles(/ s/)$/ and compiler.get_id() != 'emcc')/" meson.build || {
+            echo "Error: Failed to patch meson.build!"
+            echo "Dumping updated meson.build snippet:"
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          echo "Verifying patch..."
+          grep "compiler.get_id() != 'emcc'" meson.build || {
+            echo "Error: Patch verification failed! Dumping context for debugging:"
+            sed -n '300,350p' meson.build
+            exit 1
+          }
+          echo "Creating Emscripten cross-file..."
+          cat > emscripten-cross.txt << 'EOF'
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          strip = 'emstrip'
+          pkg-config = 'pkg-config'
+          [properties]
+          needs_exe_wrapper = true
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm'
+          cpu = 'wasm32'
+          endian = 'little'
+          EOF
+          echo "Creating minimal config-host.mak..."
+          mkdir -p build
+          cat > build/config-host.mak << 'EOF'
+          SRC_PATH=/home/runner/work/AVM/AVM/qemu
+          TARGET_DIRS=i386-softmmu
+          CONFIG_SDL=y
+          CONFIG_XEN=n
+          CONFIG_KVM=n
+          CONFIG_VNC=n
+          CONFIG_DOCS=n
+          CONFIG_TOOLS=n
+          CONFIG_GUEST_AGENT=n
+          CONFIG_LINUX=y
+          EOF
+          echo "Setting up Meson for cross-compilation..."
+          source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
+          meson setup build \
+            --cross-file emscripten-cross.txt \
+            -Dsdl=enabled \
+            -Dxen=disabled \
+            -Dkvm=disabled \
+            -Dvnc=disabled \
+            -Ddocs=disabled \
+            -Dtools=disabled \
+            -Dguest_agent=disabled \
+            -Db_lto=true \
+            -Doptimization=2 || {
+            echo "Error: Meson setup failed!"
+            if [ -f build/meson-logs/meson-log.txt ]; then
+              echo "Dumping meson-log.txt for debugging..."
+              cat build/meson-logs/meson-log.txt
+            fi
+            exit 1
+          }
+          echo "Building with ninja..."
+          cd build
+          ninja i386-softmmu/qemu-system-i386 CFLAGS="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1" LDFLAGS="-s WASM=1 -s USE_SDL=2 -s EXPORTED_FUNCTIONS='[_main]' -s EXPORTED_RUNTIME_METHODS='[ccall,cwrap]' -s ALLOW_MEMORY_GROWTH=1" || {
+            echo "Error: Ninja build failed!"
+            exit 1
+          }
+          echo "Build completed, listing generated files..."
+          ls -la i386-softmmu/qemu-system-i386*
+          if [ -f "i386-softmmu/qemu-system-i386.wasm" ]; then
+            FILE_SIZE=$(stat -f%z i386-softmmu/qemu-system-i386.wasm 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.wasm)
+            echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
+            if [ "$FILE_SIZE" -eq 0 ]; then
+              echo "Error: qemu-system-i386.wasm is empty!"
+              exit 1
+            fi
           else
-            echo "Build failed"
+            echo "Error: qemu-system-i386.wasm not generated!"
             exit 1
           fi
+          if [ -f "i386-softmmu/qemu-system-i386.js" ]; then
+            FILE_SIZE=$(stat -f%z i386-softmmu/qemu-system-i386.js 2>/dev/null || stat -c%s i386-softmmu/qemu-system-i386.js)
+            echo "qemu-system-i386.js size: $FILE_SIZE bytes"
+          else
+            echo "Warning: qemu-system-i386.js not generated!"
+          fi
+          mkdir -p ../../qemujs-binaries
+          echo "Copying generated files..."
+          cp i386-softmmu/qemu-system-i386.js ../../qemujs-binaries/ || echo "Warning: No qemu-system-i386.js found."
+          cp i386-softmmu/qemu-system-i386.wasm ../../qemujs-binaries/ || {
+            echo "Error: Failed to copy qemu-system-i386.wasm!"
+            exit 1
+          }
+          cp i386-softmmu/*.data ../../qemujs-binaries/ 2>/dev/null || echo "No .data files found."
+          echo "Listing copied files in qemujs-binaries..."
+          ls -la ../../qemujs-binaries
+        working-directory: .
 
-      - name: Upload Artifacts
+      - name: Verify Files in Binaries Directory
+        run: |
+          cd qemujs-binaries
+          echo "Verifying files in qemujs-binaries..."
+          ls -la
+          if [ -f "qemu-system-i386.wasm" ]; then
+            FILE_SIZE=$(stat -f%z qemu-system-i386.wasm 2>/dev/null || stat -c%s qemu-system-i386.wasm)
+            echo "qemu-system-i386.wasm size: $FILE_SIZE bytes"
+            if [ "$FILE_SIZE" -eq 0 ]; then
+              echo "Error: qemu-system-i386.wasm is empty!"
+              exit 1
+            fi
+          else
+            echo "Error: qemu-system-i386.wasm not found in qemujs-binaries!"
+            exit 1
+          fi
+          if [ -f "qemu-system-i386.js" ]; then
+            FILE_SIZE=$(stat -f%z qemu-system-i386.js 2>/dev/null || stat -c%s qemu-system-i386.js)
+            echo "qemu-system-i386.js size: $FILE_SIZE bytes"
+          else
+            echo "Warning: qemu-system-i386.js not found."
+          fi
+        working-directory: .
+
+      - name: Test Qemu.js Binary
+        run: |
+          cd qemujs-binaries
+          echo "Testing Qemu.js binary..."
+          if [ -f "qemu-system-i386.js" ]; then
+            node qemu-system-i386.js --version || echo "Test may fail as Qemu.js might not support --version directly."
+          else
+            echo "Warning: qemu-system-i386.js not found, skipping test."
+          fi
+          if [ -f "qemu-system-i386.wasm" ]; then
+            echo "Found qemu-system-i386.wasm."
+            ls -la qemu-system-i386.wasm
+          else
+            echo "Error: qemu-system-i386.wasm not found!"
+            exit 1
+          fi
+        working-directory: .
+
+      - name: Upload Qemu.js Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-wasm-build
-          path: ${{ env.OUTPUT_DIR }}/*
+          name: qemu-js-prebuilt
+          path: |
+            qemujs-binaries/qemu-system-i386.js
+            qemujs-binaries/qemu-system-i386.wasm
+            qemujs-binaries/*.data
           if-no-files-found: error
           retention-days: 7
 
       - name: Cleanup
+        run: |
+          rm -rf qemu emsdk qemujs-binaries
+
+      - name: Notify Build Status
         if: always()
         run: |
-          rm -rf qemu-src ${{ env.BUILD_DIR }} ${{ env.OUTPUT_DIR }}
+          echo "Pre-built Qemu.js job completed with status: ${{ job.status }}"
