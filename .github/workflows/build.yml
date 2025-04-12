@@ -99,12 +99,13 @@ jobs:
             echo "Error: emcc/em++ patch not found!"
             exit 1
           }
-          # Patch to replace entire compiler check block
-          sed -i "/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/error('You either need GCC v7.4.*')/d" meson.build || {
+          # Patch to remove original compiler check block
+          sed -i "/foreach lang : all_languages/,/endforeach/{/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/,/endif/d}" meson.build || {
             echo "Error: Failed to remove original compiler check block!"
             sed -n '300,350p' meson.build
             exit 1
           }
+          # Insert gcc/clang patch after emcc/em++
           sed -i "/if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'/{n;s/endif/endif\n  if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'\n    # ok\n  endif/}" meson.build || {
             echo "Error: Failed to insert gcc/clang patch!"
             sed -n '300,350p' meson.build
@@ -113,6 +114,7 @@ jobs:
           echo "Verifying gcc/clang patch..."
           grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build || {
             echo "Error: gcc/clang patch not found!"
+            sed -n '300,350p' meson.build
             exit 1
           }
           # Patch to remove CPU check error for wasm
@@ -125,9 +127,10 @@ jobs:
           echo "Verifying CPU patch..."
           ! grep "error('Unsupported CPU" meson.build || {
             echo "Error: CPU patch not applied correctly!"
+            sed -n '870,880p' meson.build
             exit 1
           }
-          echo "Verifying patches..."
+          echo "Verifying all patches..."
           grep "if compiler.get_id() == 'emcc' or compiler.get_id() == 'em++'" meson.build && \
           grep "if compiler.get_id() == 'gcc' or compiler.get_id() == 'clang'" meson.build && \
           ! grep "error('You either need GCC v7.4" meson.build && \
@@ -141,6 +144,7 @@ jobs:
           echo "Checking meson.build syntax..."
           meson introspect meson.build --ast || {
             echo "Error: meson.build syntax check failed!"
+            sed -n '300,350p' meson.build
             exit 1
           }
           echo "Creating Emscripten cross-file..."
