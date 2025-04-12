@@ -43,6 +43,15 @@ jobs:
           mv qemu-${{ env.QEMU_VERSION }} qemu-src
           rm qemu-${{ env.QEMU_VERSION }}.tar.xz
 
+      - name: Patch QEMU Build System
+        run: |
+          cd qemu-src
+          # Patch configure to accept Emscripten compiler
+          sed -i 's/check_define __linux__/true || &/' configure
+          sed -i 's/check_define __FreeBSD__/true || &/' configure
+          # Disable 64-bit compilation attempts
+          sed -i 's/-m64//g' configure meson.build
+
       - name: Configure and Build QEMU
         run: |
           mkdir -p ${{ env.BUILD_DIR }}
@@ -51,18 +60,26 @@ jobs:
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Create compiler symlinks that QEMU expects
-          ln -sf "$(which emcc)" emgcc
-          ln -sf "$(which em++)" emg++
-          ln -sf "$(which emar)" emar
+          # Create compiler wrapper scripts
+          cat > emgcc << 'EOF'
+          #!/bin/bash
+          exec emcc -s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 "$@"
+          EOF
+          
+          cat > emg++ << 'EOF'
+          #!/bin/bash
+          exec em++ -s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 "$@"
+          EOF
+          
+          chmod +x emgcc emg++
           export PATH="$PWD:$PATH"
           
           # Configure QEMU
+          CC="$(pwd)/emgcc" \
+          CXX="$(pwd)/emg++" \
+          AR="$(which emar)" \
           ../qemu-src/configure \
             --cross-prefix="" \
-            --cc=emgcc \
-            --cxx=emg++ \
-            --host-cc=emgcc \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
@@ -74,8 +91,8 @@ jobs:
             --enable-lto \
             --enable-strip \
             --disable-pie \
-            --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
-            --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
+            --extra-cflags="" \
+            --extra-ldflags=""
           
           # Build with ninja
           ninja -v
