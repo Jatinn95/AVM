@@ -43,23 +43,12 @@ jobs:
           mv qemu-${{ env.QEMU_VERSION }} qemu-src
           rm qemu-${{ env.QEMU_VERSION }}.tar.xz
 
-      - name: Patch QEMU Build System
-        run: |
-          cd qemu-src
-          # Patch configure to accept Emscripten compiler
-          sed -i 's/check_define __linux__/true || &/' configure
-          sed -i 's/check_define __FreeBSD__/true || &/' configure
-          # Disable 64-bit compilation attempts
-          sed -i 's/-m64//g' configure meson.build
-          # Skip sanity checks for WASM
-          sed -i 's/run_command(cc, check_args, check: true)/true/' meson.build
-
       - name: Configure and Build QEMU
         run: |
           mkdir -p ${{ env.BUILD_DIR }}
           cd ${{ env.BUILD_DIR }}
           
-          # Source Emscripten environment properly
+          # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
           # Create Emscripten cross-compilation file
@@ -82,22 +71,28 @@ jobs:
           endian = 'little'
           EOF
           
-          # Configure with Meson directly
-          meson setup ../qemu-src \
+          # First run configure with target list
+          ../qemu-src/configure \
+            --cross-prefix=em \
+            --target-list=i386-softmmu \
+            --enable-sdl \
+            --disable-xen \
+            --disable-kvm \
+            --disable-vnc \
+            --disable-docs \
+            --disable-tools \
+            --disable-guest-agent \
+            --enable-lto \
+            --enable-strip \
+            --disable-pie \
+            --extra-cflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1" \
+            --extra-ldflags="-s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1"
+          
+          # Then run meson setup
+          meson setup . \
             --cross-file emscripten-cross.txt \
-            -Dtarget_list=i386-softmmu \
-            -Dsdl=enabled \
-            -Dxen=disabled \
-            -Dkvm=disabled \
-            -Dvnc=disabled \
-            -Ddocs=disabled \
-            -Dtools=disabled \
-            -Dguest_agent=disabled \
-            -Db_lto=true \
-            -Doptimization=3 \
-            -Ddebug=false \
-            -Dstrip=true \
-            -Db_pie=false
+            --buildtype release \
+            --optimization 3
           
           # Build with ninja
           ninja -v
