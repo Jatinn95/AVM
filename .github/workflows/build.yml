@@ -49,22 +49,17 @@ jobs:
           # Patch configure to skip unsupported checks
           sed -i 's/check_define __linux__/true || &/' configure
           sed -i 's/check_define __FreeBSD__/true || &/' configure
-          
-          # Create minimal configuration for WASM
-          cat > config-host.mak << 'EOF'
-          CONFIG_SDL=y
-          CONFIG_XEN=n
-          CONFIG_KVM=n
-          CONFIG_VNC=n
-          CONFIG_DOCS=n
-          CONFIG_TOOLS=n
-          CONFIG_GUEST_AGENT=n
-          EOF
 
       - name: Create Emscripten Build Environment
         run: |
           mkdir -p ${{ env.BUILD_DIR }}
           cd ${{ env.BUILD_DIR }}
+          
+          # Create compiler symlinks
+          ln -sf "$(which emcc)" emcc
+          ln -sf "$(which em++)" em++
+          ln -sf "$(which emar)" emar
+          export PATH="$PWD:$PATH"
           
           cat > build.sh << 'EOF'
           #!/bin/bash
@@ -75,9 +70,9 @@ jobs:
           
           # Configure with minimal options
           ../qemu-src/configure \
+            --cross-prefix="" \
             --cc=emcc \
             --host-cc=emcc \
-            --ar=emar \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
