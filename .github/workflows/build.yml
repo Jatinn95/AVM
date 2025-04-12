@@ -91,17 +91,18 @@ jobs:
           sed -i "/foreach lang : all_languages/{n;s/compiler = meson.get_compiler(lang)/compiler = meson.get_compiler(lang)\n  if compiler.get_id() == 'emcc'\n    # ok\n  endif\n  /}" meson.build
           # Patch to remove GCC version check globally
           sed -i "s/if compiler.get_id() == 'gcc' and compiler.version().version_compare('>=7.4')/if compiler.get_id() == 'gcc'/" meson.build
-          # Additional patch to replace error message block with broader acceptance
-          sed -i "/error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')/c\    # Allow other compilers for cross-compilation" meson.build || {
-            echo "Error: Failed to patch meson.build!"
+          # Patch to remove CPU check error for wasm
+          sed -i "/error('Unsupported CPU @0@, try --enable-tcg-interpreter')/c\    # Allow wasm CPU with TCG interpreter" meson.build || {
+            echo "Error: Failed to patch meson.build for CPU check!"
             echo "Dumping updated meson.build snippet:"
-            sed -n '300,350p' meson.build
+            sed -n '870,880p' meson.build
             exit 1
           }
-          echo "Verifying patch..."
-          grep "if compiler.get_id() == 'emcc'" meson.build && grep "if compiler.get_id() == 'gcc'" meson.build && ! grep "error('You either need GCC v7.4" meson.build || {
+          echo "Verifying patches..."
+          grep "if compiler.get_id() == 'emcc'" meson.build && grep "if compiler.get_id() == 'gcc'" meson.build && ! grep "error('Unsupported CPU" meson.build || {
             echo "Error: Patch verification failed! Dumping context for debugging:"
             sed -n '300,350p' meson.build
+            sed -n '870,880p' meson.build
             exit 1
           }
           echo "Creating Emscripten cross-file..."
@@ -133,6 +134,7 @@ jobs:
           CONFIG_TOOLS=n
           CONFIG_GUEST_AGENT=n
           CONFIG_LINUX=y
+          CONFIG_TCG_INTERPRETER=y
           EOF
           echo "Setting up Meson for cross-compilation..."
           source "${{ env.EMSDK_PATH }}/emsdk_env.sh"
@@ -145,6 +147,7 @@ jobs:
             -Ddocs=disabled \
             -Dtools=disabled \
             -Dguest_agent=disabled \
+            -Dtcg_interpreter=true \
             -Db_lto=true \
             -Doptimization=2 || {
             echo "Error: Meson setup failed!"
