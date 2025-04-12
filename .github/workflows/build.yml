@@ -46,11 +46,10 @@ jobs:
       - name: Patch QEMU Build System
         run: |
           cd qemu-src
-          # Patch configure to accept Emscripten compiler
-          sed -i 's/check_define __linux__/true || &/' configure
-          sed -i 's/check_define __FreeBSD__/true || &/' configure
-          # Disable 64-bit compilation attempts
-          sed -i 's/-m64//g' configure meson.build
+          # Disable compiler checks that fail with Emscripten
+          sed -i 's/run_command(cc, check_args, check: true)/true/' configure
+          # Disable 64-bit compilation
+          sed -i 's/-m64//g' configure
 
       - name: Configure and Build QEMU
         run: |
@@ -60,26 +59,18 @@ jobs:
           # Source Emscripten environment
           source "$EMSDK/emsdk_env.sh"
           
-          # Create compiler wrapper scripts
-          cat > emgcc << 'EOF'
+          # Create compiler wrappers
+          cat > emcc_wrapper << 'EOF'
           #!/bin/bash
           exec emcc -s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 "$@"
           EOF
+          chmod +x emcc_wrapper
           
-          cat > emg++ << 'EOF'
-          #!/bin/bash
-          exec em++ -s WASM=1 -s USE_SDL=2 -s ASSERTIONS=1 -s ALLOW_MEMORY_GROWTH=1 "$@"
-          EOF
-          
-          chmod +x emgcc emg++
-          export PATH="$PWD:$PATH"
-          
-          # Configure QEMU
-          CC="$(pwd)/emgcc" \
-          CXX="$(pwd)/emg++" \
+          # Configure QEMU with direct compiler specification
+          CC="$(pwd)/emcc_wrapper" \
+          CXX="$(which em++)" \
           AR="$(which emar)" \
           ../qemu-src/configure \
-            --cross-prefix="" \
             --target-list=i386-softmmu \
             --enable-sdl \
             --disable-xen \
@@ -91,11 +82,12 @@ jobs:
             --enable-lto \
             --enable-strip \
             --disable-pie \
+            --cross-prefix="" \
             --extra-cflags="" \
             --extra-ldflags=""
           
-          # Build with ninja
-          ninja -v
+          # Build with make (bypassing meson)
+          make -j$(nproc)
           
           # Verify the build output
           if [ -f "qemu-system-i386" ]; then
